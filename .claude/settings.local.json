@@ -8,7 +8,8 @@
       "Bash(Rscript -e \"packageVersion\\(''glue''\\)\")",
       "Bash(Rscript -e \"pkgs <- c\\(''devtools'',''usethis'',''roxygen2'',''testthat'',''withr''\\); for \\(p in pkgs\\) { v <- tryCatch\\(as.character\\(packageVersion\\(p\\)\\), error=function\\(e\\) ''NOT INSTALLED''\\); cat\\(p, '':'', v, ''\\\\n''\\) }\")",
       "Bash(find /Users/rjs/Documents/mermaid2drawML -type f -name *.json -o -name *.yml -o -name *.yaml -o -name Makefile -o -name .env* -o -name Procfile -o -name *.py -o -name *.R)",
-      "Bash(grep -E '\\\\.\\(json|yml|yaml|js|py|R|env\\)$|Makefile|Procfile')"
+      "Bash(grep -E '\\\\.\\(json|yml|yaml|js|py|R|env\\)$|Makefile|Procfile')",
+      "Bash(R -e \"devtools::check\\(''''.'''', cran=FALSE\\)\")"
     ]
   }
 }

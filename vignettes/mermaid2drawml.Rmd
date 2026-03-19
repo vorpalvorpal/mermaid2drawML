@@ -1,0 +1,205 @@
+---
+title: "Getting Started with mermaid2drawml"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{Getting Started with mermaid2drawml}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>"
+)
+```
+
+```{r setup}
+library(mermaid2drawml)
+```
+
+## Introduction
+
+`mermaid2drawml` converts [Mermaid](https://mermaid.js.org/) flowchart diagrams
+into natively editable Microsoft Word shapes (DrawingML `wps:wsp` format). Unlike
+embedding a static image, the resulting shapes can be selected, moved, resized,
+and reformatted directly inside Word.
+
+The package integrates with the [officer](https://davidgohel.github.io/officer/)
+package, making it easy to insert diagrams programmatically into `.docx` files
+— for example, from R Markdown reports.
+
+## Installation
+
+```r
+# Install from source
+install.packages("mermaid2drawml", repos = NULL, type = "source")
+
+# Or via pak/remotes if published to a repository
+pak::pak("mermaid2drawml")
+```
+
+## Basic Usage
+
+### `mermaid_to_word()`
+
+The primary function parses Mermaid syntax, calculates a Sugiyama hierarchical
+layout, and builds DrawingML XML:
+
+```{r basic}
+diagram <- mermaid_to_word(
+  "flowchart TB
+    A[Collect Data] --> B{Quality Check}
+    B -->|Pass| C[Analyse]
+    B -->|Fail| D[Reject]
+    C --> E[Report]"
+)
+
+print(diagram)
+```
+
+The returned `mermaid_word_diagram` object contains:
+
+- `$xml` — the raw DrawingML XML string
+- `$graph` — the parsed and laid-out `mermaid_graph`
+- `$next_id` — the next available shape ID (needed when adding multiple diagrams)
+
+### `body_add_mermaid()`
+
+For direct insertion into a Word document:
+
+```{r body_add, eval = FALSE}
+library(officer)
+
+doc <- read_docx() |>
+  body_add_par("Flowchart of the process", style = "heading 2") |>
+  body_add_mermaid(
+    "flowchart TB
+      A[Start] --> B[Process] --> C[End]"
+  )
+
+print(doc, target = "output.docx")
+```
+
+## Using in R Markdown
+
+In an R Markdown document, place the insertion code in an R chunk. The output
+file must be a Word document (use `output: word_document`):
+
+```
+---
+output: word_document
+---
+
+# In an R chunk within the Rmd:
+library(officer)
+library(mermaid2drawml)
+
+my_diagram <- "
+flowchart LR
+  A[Input] --> B[Transform] --> C[Output]
+"
+
+read_docx() |>
+  body_add_mermaid(my_diagram) |>
+  print(target = knitr::fig_path(".docx"))
+```
+
+> **Note**: `knitr::fig_path()` generates a unique path per chunk, avoiding
+> collisions when multiple diagrams appear in the same document.
+
+## Layout Options
+
+`calculate_layout()` (called internally by `mermaid_to_word()`) accepts several
+parameters that control diagram sizing and spacing:
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `page_width_in` | 6.0 | Usable diagram width (inches) |
+| `page_height_in` | 8.0 | Maximum diagram height (inches) |
+| `node_w_in` | 1.4 | Node width (inches) |
+| `node_h_in` | 0.55 | Node height (inches) |
+| `h_gap_in` | 0.3 | Horizontal gap between nodes |
+| `v_gap_in` | 0.4 | Vertical gap between ranks |
+| `margin_in` | 1.0 | Page margin offset (inches) |
+
+Pass these through `...` in `mermaid_to_word()` or `body_add_mermaid()`:
+
+```{r layout_opts, eval = FALSE}
+diagram <- mermaid_to_word(
+  "flowchart LR\n  A --> B --> C",
+  node_w_in = 2.0,
+  h_gap_in  = 0.5
+)
+```
+
+## Multi-Diagram Documents
+
+When adding multiple diagrams to a single document, you must chain the `start_id`
+/ `next_id` values to avoid shape ID collisions (Word requires unique IDs):
+
+```{r multi_diagram, eval = FALSE}
+library(officer)
+
+d1 <- mermaid_to_word(
+  "flowchart TB\n  A --> B",
+  start_id = 1L
+)
+
+d2 <- mermaid_to_word(
+  "flowchart LR\n  C --> D --> E",
+  start_id = d1$next_id   # pick up where d1 left off
+)
+
+doc <- read_docx() |>
+  officer::body_add_xml(d1$xml) |>
+  body_add_par("") |>
+  officer::body_add_xml(d2$xml)
+
+print(doc, target = "multi.docx")
+```
+
+Alternatively, use `body_add_mermaid()` with explicit `start_id` tracking:
+
+```{r multi_body, eval = FALSE}
+library(officer)
+
+next_id <- 1L
+
+add_diagram <- function(doc, code) {
+  d       <- mermaid_to_word(code, start_id = next_id)
+  next_id <<- d$next_id
+  officer::body_add_xml(doc, d$xml)
+}
+
+doc <- read_docx() |>
+  add_diagram("flowchart TB\n  A --> B") |>
+  add_diagram("flowchart LR\n  C --> D")
+
+print(doc, target = "multi.docx")
+```
+
+## Supported Mermaid Syntax
+
+The parser handles the following features:
+
+- **Directions**: `TB`, `TD`, `LR`, `BT`, `RL`
+- **Node shapes**: `[rect]`, `(roundRect)`, `{diamond}`, `((ellipse))`,
+  `{{hexagon}}`, `[/parallelogram/]`
+- **Edge types**: `-->` (arrow), `---` (line), `-.->` (dashed), `<-->` (bidirectional),
+  `o--o` (circle ends), `x--x` (cross ends), `==>` (thick)
+- **Edge labels**: `-->|label|` (pipe syntax) and inline `-- label -->`
+- **Chained edges**: `A --> B --> C`
+- **Subgraphs**
+- **classDef** style definitions with `fill`, `stroke`, `color`, `stroke-width`
+- **class** assignments
+- **Comments**: `%% ...`
+- **v10 shapes**: `M1@{shape: text, label: "..."}`
+
+## Notes on Round-Trip Capability
+
+Each shape and connector in the generated Word document stores JSON metadata in
+its `wp:docPr descr` attribute. This metadata records the original Mermaid
+properties (node ID, label, shape type, edge endpoints, etc.) under a versioned
+schema (`"v": "1"`). A future Word-to-Mermaid conversion feature can use this
+metadata to reconstruct the diagram source from an edited Word document.
