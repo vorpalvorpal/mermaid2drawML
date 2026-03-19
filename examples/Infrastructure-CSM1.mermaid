@@ -1,0 +1,73 @@
+
+graph TB
+    subgraph Planning
+        direction TB
+        A[Stakeholder Engagement]:::plan --> B[Whole Site Analysis]
+        B:::plan --> C[Integrated System Planning]
+        C:::plan --> D[Design]
+        D:::plan --> E[Scenario Planning]
+        E:::plan --> B
+    end
+
+    subgraph Construction
+        %% direction TB
+        F[Asset 1]:::construct
+        G[Asset 2]:::construct
+        GG[Asset n]:::construct
+    
+        F o--o G
+        G o--o GG
+    end
+
+    subgraph Operations
+        H[Asset 1]:::operation
+        I[Asset 2]:::operation
+        J[Asset n]:::operation
+
+        H o--o I
+        I o--o J
+    end
+
+	subgraph Maintenance
+	    H_m[Asset 1]:::maintain
+      I_m[Asset 2]:::maintain
+      J_m[Asset n]:::maintain
+
+      H_m o--o I_m
+      I_m o--o J_m
+	end
+
+  subgraph MERI
+	    K[Continuous Monitoring]:::meri
+  end
+
+  Planning --> Construction
+  
+  Construction --> Operations
+
+  Operations --> K
+
+  Maintenance ---> Operations
+
+  MERI ---> |Continuous Improvement| Operations
+  MERI ---> |Minor Issue| Maintenance
+  MERI ---> |Major Issue| Planning
+  MERI ---> |Lifecycle Review| Planning
+
+  classDef plan fill:transparent,stroke:#FCA789,stroke-width:2px,color:#FCA789;
+  classDef meri fill:transparent,stroke:#FFB71B,stroke-width:2px,color:#FFB71B;
+  classDef maintain fill:transparent,stroke:#A3C380,stroke-width:2px,color:#A3C380;
+  classDef operation fill:transparent,stroke:#6095C1,stroke-width:2px,color:#6095C1;
+  classDef construct fill:transparent,stroke:#9186BF,stroke-width:2px,color:#9186BF;
+  
+  classDef subPlan fill:transparent,stroke:#FCA789,stroke-width:2px,color:#FFFFFF,font-size:20px;
+  classDef subMeri fill:transparent,stroke:#FFB71B,stroke-width:2px,color:#FFFFFF,font-size:20px;
+  classDef subMaintain fill:transparent,stroke:#A3C380,stroke-width:2px,color:#FFFFFF,font-size:20px;
+  classDef subOperation fill:transparent,stroke:#6095C1,stroke-width:2px,color:#FFFFFF,font-size:20px;
+  classDef subConstruct fill:transparent,stroke:#9186BF,stroke-width:2px,color:#FFFFFF,font-size:20px;
+  
+  class Planning subPlan;
+  class MERI subMeri;
+  class Maintenance subMaintain;
+  class Operations subOperation;
+  class Construction subConstruct;

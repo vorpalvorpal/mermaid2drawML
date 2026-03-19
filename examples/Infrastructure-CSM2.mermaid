@@ -1,0 +1,49 @@
+
+graph LR
+    A[Plant]:::@@{bg_colour}@@ --> B[Cover]:::@@{bg_colour}@@ --> H
+    B --> C
+    C[Leachate drainage system]:::@@{bg_colour}@@ <--> E
+    C --> R
+    C <--> H
+    D[Upstream Cut-off wall]:::@@{bg_colour}@@ --> K
+    AC --> D
+    E[Landfill liner]:::@@{bg_colour}@@
+    F[Upstream sediment dam]:::@@{bg_colour}@@ --> P
+    G[Attunga Drain]:::@@{bg_colour}@@
+    H[Landfill gas extraction system]:::@@{bg_colour}@@ <--> I[Flare]:::@@{bg_colour}@@
+    AC --> I
+    H --> J
+    J[Odour fence]:::@@{bg_colour}@@
+    AC --> J
+    K[Downstream cut-off wall]:::@@{bg_colour}@@ <--> S
+    AC --> K
+    L[Diversion pipe]:::@@{bg_colour}@@
+    M[Old diversion pipe]:::@@{bg_colour}@@ <--> S
+    N[Dirt roads]:::@@{bg_colour}@@ --> Q
+    M[Sealed roads]:::@@{bg_colour}@@ --> O[Wheel wash]:::@@{bg_colour}@@
+    P[Bio-detention basin]:::@@{bg_colour}@@
+    B --> Q[Storm water dam]:::@@{bg_colour}@@
+    C --> R[Lined leachate dam]:::@@{bg_colour}@@ --> S[Trade waste dam]:::@@{bg_colour}@@
+    AC --> R
+    AC --> S
+    G --> T[Bores]:::@@{bg_colour}@@
+    N --> T
+    U[Machinery shed]:::@@{bg_colour}@@ --> A
+    M --> V[Re-use shed]:::@@{bg_colour}@@
+    AC --> V
+    M --> W[Office sheds]:::@@{bg_colour}@@
+    AC --> W
+    AA --> W
+    M --> X[Saw tooth bay]:::@@{bg_colour}@@
+    M --> Y[Gatehouse]:::@@{bg_colour}@@
+    AA --> Y
+    AC --> Y
+    M --> Z[Weighbridge]:::@@{bg_colour}@@
+    AC --> Z
+    AC --> Y
+    AA[Sewer connection]:::@@{bg_colour}@@ --> S
+    AB[Photovoltaics]:::@@{bg_colour}@@ <--> AC[Electrical connection]:::@@{bg_colour}@@
+    AD[Weather station]:::@@{bg_colour}@@
+    AE[Rain gauge]:::@@{bg_colour}@@ --> S
+
+    

@@ -1,0 +1,13 @@
+flowchart TB
+    Target[**Target**]
+    Goal["**Goal**<br><i style='font-size:smaller'>...R.</i>"]
+    Obj["**Objective**<br><i style='font-size:smaller'>S..R.</i>"]
+    Ind["**Indicator**<br><i style='font-size:smaller'>SM.R.</i>"]
+    Aud["**Audit Question**<br><i style='font-size:smaller'>SM.RT</i>"]
+    Trig["**Trigger Action**<br><i style='font-size:smaller'>SMART</i>"]
+
+    Target --> |Realistic| Goal
+    Goal --> |Specific| Obj
+    Obj --> |Measurable| Ind
+    Ind --> |Time-related| Aud
+    Aud --> |Assignable| Trig

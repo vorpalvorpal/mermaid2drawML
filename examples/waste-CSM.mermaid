@@ -1,0 +1,62 @@
+flowchart TD
+    subgraph space01[ ]
+        subgraph Domestic_Commercial["Domestic/Commercial"]
+            subgraph space2[ ]
+                subgraph Gatehouse
+                    subgraph space2.1[ ]
+                        B2{{Initial Screening}}:::Mountains
+                    end
+                end
+                
+                B2 -->|Rejected| C2[\Exit site/]:::Mountains
+                B2 -->|Accepted| E2{{Secondary Screening}}:::Mountains
+                E2 -->|Rejected| C2
+                F2 --> C2
+                
+                subgraph SVA[Small Vehicle Area]
+                    subgraph space2.2[ ]
+                        E2 -->|Light vehicles| F1[Small Vehicle Area Bins]:::Mountains
+                        E2 -->|Reusable| F2[Reuse Shed]:::Mountains
+                    end
+                end
+            end
+        end
+    end
+
+    subgraph Municipal
+        subgraph space1[ ]
+            AA1[Resident sorting]:::Canyon --> A1
+            A1[Kerbside Collection]:::Canyon --> B1{{Collection Screening}}:::Canyon
+            B1 -->|Rejected| C1[\Not collected/]:::Canyon
+        end
+    end
+    
+    subgraph space02[ ]
+        subgraph Resource_Recovery["Resource&#160;Recovery"]
+            subgraph space3[ ]
+                E2 ---->|Heavy vehicles| F3[Stockpiles]:::Bush
+                F1 --> F3
+                F3 --> G2{{Tertiary Screening}}:::Bush
+                G2 -->|Recoverable| H2[\Transport Off Site/]:::Bush
+            end
+        end
+    end
+
+    subgraph Landfill
+        subgraph space4[ ]
+            B1 ----> J1[Active Cell]:::Earth
+            F1 ----> J1
+            G2 -->|Residual| J1
+            E2 ---->|Special Waste| J1
+            L1[Cover]:::Earth --> J1
+            M1@{shape: text, label: Compaction} --o J1
+        end
+    end
+
+    class Municipal subCanyon;
+    class Domestic_Commercial subMountains;
+    class Resource_Recovery subBush;
+    class Landfill subEarth;
+    class Gatehouse,SVA subSub;
+    class space01,space02,space1,space2,space2.1,space2.2,space3,space4 subSpace;
+    
