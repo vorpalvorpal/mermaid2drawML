@@ -14,9 +14,11 @@
 #' @param ... Additional arguments passed to [build_diagram_xml()], e.g.
 #'   `page_width_in`, `margin_in`, `default_stroke`.
 #' @return A `mermaid_word_diagram` object with fields:
-#'   - `xml`: DrawingML XML string
-#'   - `svg_data`: parsed SVG geometry (nodes, edges, viewbox)
-#'   - `ast`: mermaid AST from `@mermaid-js/parser`
+#'   - `xml`: DrawingML XML string ready for [officer::body_add_xml()]
+#'   - `svg_data`: parsed SVG geometry (nodes, edges, viewbox tibbles)
+#'   - `ast`: raw output from `@mermaid-js/parser`; a `_parseError` field
+#'     indicates an unsupported diagram type (e.g. flowchart). Currently unused
+#'     during conversion — see `enrich_from_ast()` in `parse_svg.R`.
 #'   - `next_id`: next available shape ID for chaining documents
 #' @examples
 #' \dontrun{

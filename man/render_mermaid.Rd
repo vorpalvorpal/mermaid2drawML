@@ -15,11 +15,20 @@ Chromium can be slow on first call. Default \code{120}.}
 \value{
 A named list with:
 \itemize{
-\item \code{ast}: parsed list from \verb{@mermaid-js/parser} (or \verb{list(_parseError=...)})
-\item \code{svg}: character string of the rendered SVG
+\item \code{ast}: parsed list from \verb{@mermaid-js/parser}, or
+\verb{list(_parseError = "<message>")} for unsupported diagram types
+\item \code{svg}: character string of the rendered SVG (always present)
 }
 }
 \description{
-Calls \code{mermaid_bridge.js} which uses \verb{@mermaid-js/parser} for the AST and
-\verb{@mermaid-js/mermaid-cli} for the SVG. Both are returned in a single list.
+Calls \code{mermaid_bridge.js}, which runs two Node.js operations in one process:
+\verb{@mermaid-js/mermaid-cli} renders the diagram to SVG (via Puppeteer/Chromium),
+and \verb{@mermaid-js/parser} attempts to parse the syntax to a JSON AST.
+}
+\details{
+The SVG is the authoritative output and drives all shape generation. The AST
+is collected opportunistically for future use (see \code{enrich_from_ast()} in
+\code{parse_svg.R}), but is not currently consulted during conversion. For
+flowcharts — the most common diagram type — \verb{@mermaid-js/parser} v0.3.x does
+not support the diagram type and returns a \verb{_parseError} sentinel instead.
 }

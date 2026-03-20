@@ -20,9 +20,11 @@ the same document to avoid ID collisions. Default \code{1L}.}
 \value{
 A \code{mermaid_word_diagram} object with fields:
 \itemize{
-\item \code{xml}: DrawingML XML string
-\item \code{svg_data}: parsed SVG geometry (nodes, edges, viewbox)
-\item \code{ast}: mermaid AST from \verb{@mermaid-js/parser}
+\item \code{xml}: DrawingML XML string ready for \code{\link[officer:body_add_xml]{officer::body_add_xml()}}
+\item \code{svg_data}: parsed SVG geometry (nodes, edges, viewbox tibbles)
+\item \code{ast}: raw output from \verb{@mermaid-js/parser}; a \verb{_parseError} field
+indicates an unsupported diagram type (e.g. flowchart). Currently unused
+during conversion — see \code{enrich_from_ast()} in \code{parse_svg.R}.
 \item \code{next_id}: next available shape ID for chaining documents
 }
 }

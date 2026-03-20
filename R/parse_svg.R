@@ -258,10 +258,29 @@ extract_stroke <- function(shape_el, g) {
 }
 
 enrich_from_ast <- function(tbl, ast) {
-  # The AST from @mermaid-js/parser contains class assignments and style info.
-  # We use it to fill in class names and colours that may not be in the SVG.
+  # NOT YET IMPLEMENTED.
+  #
+  # This stub exists to wire up the AST from @mermaid-js/parser for future use.
+  # Currently, all node geometry, labels, colours, and shapes are read directly
+  # from the mermaid SVG output, which is the sole source of truth for the
+  # conversion. The AST is not consulted and the returned tibble is unchanged.
+  #
+  # What this function is intended to do eventually:
+  #   - Recover the original `classDef` name for each node (the SVG only shows
+  #     the computed fill/stroke colours, not the class name that produced them).
+  #   - Supplement inline style information that mermaid-cli flattens into SVG
+  #     attributes in ways that are hard to reverse.
+  #   - Feed richer data into the round-trip metadata JSON stored in each shape's
+  #     wp:docPr descr attribute, so a future Word→Mermaid converter can
+  #     reconstruct classDef assignments rather than just raw hex colours.
+  #
+  # Practical note on @mermaid-js/parser v0.3.x:
+  #   The parser only covers a subset of diagram types (architecture, gitGraph,
+  #   info, packet, pie). For flowcharts — the most common diagram type — it
+  #   returns a _parseError sentinel. Even for supported types, the AST has not
+  #   been used here yet. Removing the `ast` parameter from the call chain would
+  #   produce identical output today.
   if (is.null(ast) || !is.null(ast[["_parseError"]])) return(tbl)
-  # AST structure varies by diagram type — do a best-effort traversal
   tbl
 }
 

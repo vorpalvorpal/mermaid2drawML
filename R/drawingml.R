@@ -33,7 +33,10 @@
 #' Build DrawingML XML from parsed mermaid SVG geometry
 #'
 #' @param svg_data List from [parse_mermaid_svg()]: nodes, edges, viewbox.
-#' @param ast List. The mermaid AST (used for round-trip metadata JSON).
+#' @param ast List. Reserved for future use. The AST from `@mermaid-js/parser`
+#'   is accepted here for forward-compatibility but is not currently consulted.
+#'   All shape data is derived from `svg_data`. See `enrich_from_ast()` in
+#'   `parse_svg.R` for the intended use and current status.
 #' @param start_id Integer. First shape ID; increment between diagrams.
 #' @param page_width_in Numeric. Usable content width in inches (default 6.0).
 #' @param page_height_in Numeric. Max diagram height in inches (default 8.0).

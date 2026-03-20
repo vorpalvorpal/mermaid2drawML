@@ -20,7 +20,10 @@ build_diagram_xml(
 \arguments{
 \item{svg_data}{List from \code{\link[=parse_mermaid_svg]{parse_mermaid_svg()}}: nodes, edges, viewbox.}
 
-\item{ast}{List. The mermaid AST (used for round-trip metadata JSON).}
+\item{ast}{List. Reserved for future use. The AST from \verb{@mermaid-js/parser}
+is accepted here for forward-compatibility but is not currently consulted.
+All shape data is derived from \code{svg_data}. See \code{enrich_from_ast()} in
+\code{parse_svg.R} for the intended use and current status.}
 
 \item{start_id}{Integer. First shape ID; increment between diagrams.}
 
