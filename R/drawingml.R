@@ -1,17 +1,11 @@
-# DrawingML shape name mapping -------------------------------------------------
-
-.shape_map <- c(
-  rect          = "rect",
-  roundRect     = "roundRect",
-  diamond       = "diamond",
-  ellipse       = "ellipse",
-  hexagon       = "hexagon",
-  parallelogram = "parallelogram",
-  text          = "rect",
-  cylinder      = "can"
-)
-
-# Namespace declarations -------------------------------------------------------
+# R/drawingml.R
+#
+# Converts parsed SVG geometry (from parse_svg.R) + the mermaid AST into a
+# DrawingML XML string (<w:p>…</w:p>) ready for officer::body_add_xml().
+#
+# Nodes  → <wps:wsp> with <a:prstGeom> for standard shapes
+# Edges  → <wps:wsp cNvCnPr/> with <a:custGeom> reproducing dagre bezier routing
+# Labels → small transparent text-box at the label midpoint
 
 .dml_namespaces <- paste0(
   'xmlns:wpc="http://schemas.microsoft.com/office/word/2010/wordprocessingCanvas" ',
@@ -23,497 +17,323 @@
   'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"'
 )
 
-# Anchor wrapper ---------------------------------------------------------------
+.shape_map <- c(
+  rect          = "rect",
+  roundRect     = "roundRect",
+  diamond       = "diamond",
+  ellipse       = "ellipse",
+  hexagon       = "hexagon",
+  parallelogram = "parallelogram",
+  cylinder      = "can",
+  text          = "rect"
+)
 
-make_anchor <- function(x_in, y_in, w_in, h_in, shape_id, name, descr_json,
+# ── Main exported function ─────────────────────────────────────────────────
+
+#' Build DrawingML XML from parsed mermaid SVG geometry
+#'
+#' @param svg_data List from [parse_mermaid_svg()]: nodes, edges, viewbox.
+#' @param ast List. The mermaid AST (used for round-trip metadata JSON).
+#' @param start_id Integer. First shape ID; increment between diagrams.
+#' @param page_width_in Numeric. Usable content width in inches (default 6.0).
+#' @param page_height_in Numeric. Max diagram height in inches (default 8.0).
+#' @param margin_in Numeric. Left/top margin offset in inches (default 1.0).
+#' @param default_fill Default node fill colour (6-char hex). Default "FFFFFF".
+#' @param default_stroke Default stroke colour. Default "4472C4".
+#' @param default_text_color Default text colour. Default "000000".
+#' @param stroke_width_pt Stroke width in points. Default 1.5.
+#' @return Named list: xml (character) and next_id (integer).
+#' @export
+build_diagram_xml <- function(svg_data,
+                               ast                = NULL,
+                               start_id           = 1L,
+                               page_width_in      = 6.0,
+                               page_height_in     = 8.0,
+                               margin_in          = 1.0,
+                               default_fill       = "FFFFFF",
+                               default_stroke     = "4472C4",
+                               default_text_color = "000000",
+                               stroke_width_pt    = 1.5) {
+
+  nodes  <- svg_data$nodes
+  edges  <- svg_data$edges
+  vb     <- svg_data$viewbox   # c(minx, miny, svg_w, svg_h)
+
+  svg_w  <- vb[3]; svg_h <- vb[4]
+  scale  <- compute_scale(svg_w, svg_h, page_width_in, page_height_in)
+  off_x  <- inches_to_emu(margin_in)
+  off_y  <- inches_to_emu(margin_in)
+
+  shape_id <- as.integer(start_id)
+  parts    <- character(0)
+
+  if (nrow(nodes) > 0L) {
+    for (i in seq_len(nrow(nodes))) {
+      nd  <- as.list(nodes[i, ])
+      xml <- node_shape_xml(nd, shape_id, vb, scale, off_x, off_y,
+                            default_fill, default_stroke, default_text_color,
+                            stroke_width_pt)
+      if (nzchar(xml)) { parts <- c(parts, xml); shape_id <- shape_id + 1L }
+    }
+  }
+
+  if (nrow(edges) > 0L) {
+    for (i in seq_len(nrow(edges))) {
+      e   <- as.list(edges[i, ])
+      xml <- edge_shape_xml(e, shape_id, vb, scale, off_x, off_y,
+                            default_stroke, stroke_width_pt)
+      if (nzchar(xml)) { parts <- c(parts, xml); shape_id <- shape_id + 1L }
+
+      if (!is.na(e$label %||% NA_character_) &&
+          nzchar(e$label %||% "") &&
+          !is.na(e$label_x %||% NA_real_) &&
+          !is.na(e$label_y %||% NA_real_)) {
+        lxml <- edge_label_xml(e, shape_id, vb, scale, off_x, off_y,
+                               default_text_color)
+        if (nzchar(lxml)) { parts <- c(parts, lxml); shape_id <- shape_id + 1L }
+      }
+    }
+  }
+
+  xml <- paste0('<w:p ', .dml_namespaces, '>',
+                paste0(parts, collapse = ""),
+                '</w:p>')
+
+  list(xml = xml, next_id = shape_id)
+}
+
+# ── Scale ─────────────────────────────────────────────────────────────────
+
+compute_scale <- function(svg_w, svg_h, page_w_in, page_h_in) {
+  if (is.na(svg_w) || svg_w <= 0 || is.na(svg_h) || svg_h <= 0)
+    return(9525)  # 1 px = 9525 EMU at 96 dpi
+  target_w <- inches_to_emu(page_w_in)
+  target_h <- inches_to_emu(page_h_in)
+  min(target_w / svg_w, target_h / svg_h)
+}
+
+# ── Anchor wrapper ─────────────────────────────────────────────────────────
+
+make_anchor <- function(x_emu, y_emu, w_emu, h_emu,
+                         shape_id, name, descr_json,
                          z_order = 251658240L, inner_xml) {
-  x_emu <- inches_to_emu(x_in)
-  y_emu <- inches_to_emu(y_in)
-  w_emu <- inches_to_emu(max(w_in, 0.05))
-  h_emu <- inches_to_emu(max(h_in, 0.05))
+  w_emu <- max(as.integer(w_emu), 45720L)
+  h_emu <- max(as.integer(h_emu), 45720L)
   paste0(
     '<w:r><w:rPr><w:noProof/></w:rPr><w:drawing>',
     '<wp:anchor distT="0" distB="0" distL="0" distR="0" ',
     'simplePos="0" relativeHeight="', z_order, '" ',
     'behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">',
     '<wp:simplePos x="0" y="0"/>',
-    '<wp:positionH relativeFrom="page"><wp:posOffset>', x_emu, '</wp:posOffset></wp:positionH>',
-    '<wp:positionV relativeFrom="page"><wp:posOffset>', y_emu, '</wp:posOffset></wp:positionV>',
-    '<wp:extent cx="', w_emu, '" cy="', h_emu, '"/>',
+    '<wp:positionH relativeFrom="page">',
+      '<wp:posOffset>', as.integer(x_emu), '</wp:posOffset></wp:positionH>',
+    '<wp:positionV relativeFrom="page">',
+      '<wp:posOffset>', as.integer(y_emu), '</wp:posOffset></wp:positionV>',
+    '<wp:extent cx="', as.integer(w_emu), '" cy="', as.integer(h_emu), '"/>',
     '<wp:effectExtent l="0" t="0" r="0" b="0"/>',
     '<wp:wrapNone/>',
-    '<wp:docPr id="', shape_id, '" name="', xml_escape(name), '" descr="', xml_escape(descr_json), '"/>',
+    '<wp:docPr id="', shape_id,
+      '" name="', xml_escape(name),
+      '" descr="', xml_escape(descr_json), '"/>',
     '<wp:cNvGraphicFramePr/>',
     '<a:graphic>',
-    '<a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">',
+    '<a:graphicData ',
+      'uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">',
     inner_xml,
     '</a:graphicData></a:graphic>',
     '</wp:anchor></w:drawing></w:r>'
   )
 }
 
-# Node XML builder -------------------------------------------------------------
+# ── Node shapes ────────────────────────────────────────────────────────────
 
-node_to_xml <- function(node, shape_id, default_fill, default_stroke,
-                         default_text_color, stroke_width_pt) {
-  # Resolve colours
-  fill_col  <- if (!is.null(node$fill)   && !is.na(node$fill))   node$fill   else default_fill
-  strk_col  <- if (!is.null(node$stroke) && !is.na(node$stroke)) node$stroke else default_stroke
-  text_col  <- if (!is.null(node$color)  && !is.na(node$color))  node$color  else default_text_color
+node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
+                            default_fill, default_stroke, default_text_color,
+                            stroke_width_pt) {
 
-  # Fall back fill to white if still NA
-  if (is.null(fill_col) || is.na(fill_col)) fill_col <- "FFFFFF"
+  cx_emu <- as.integer(round((nd$svg_cx - vb[1]) * scale)) + off_x
+  cy_emu <- as.integer(round((nd$svg_cy - vb[2]) * scale)) + off_y
+  w_emu  <- max(as.integer(round(nd$svg_w * scale)), 91440L)  # min 0.1 in
+  h_emu  <- max(as.integer(round(nd$svg_h * scale)), 45720L)  # min 0.05 in
+  x_emu  <- cx_emu - w_emu %/% 2L
+  y_emu  <- cy_emu - h_emu %/% 2L
 
-  # Shape geometry
-  shape_key  <- if (!is.null(node$shape) && !is.na(node$shape) && node$shape %in% names(.shape_map)) {
-    node$shape
-  } else "rect"
-  prst       <- .shape_map[[shape_key]]
+  fill_hex   <- nd$fill   %||% NA_character_
+  stroke_hex <- nd$stroke %||% NA_character_
 
-  is_text_shape <- (shape_key == "text")
-
-  # Stroke width in EMU (1 pt = 12700 EMU)
-  sw_emu <- as.integer(round(stroke_width_pt * 12700))
-
-  # Fill XML
-  fill_xml <- if (is_text_shape || is.na(fill_col)) {
+  is_transparent <- is.na(fill_hex)
+  fill_xml <- if (is_transparent) {
     "<a:noFill/>"
   } else {
-    paste0('<a:solidFill><a:srgbClr val="', fill_col, '"/></a:solidFill>')
+    paste0("<a:solidFill><a:srgbClr val=\"", fill_hex, "\"/></a:solidFill>")
   }
 
-  # Stroke XML
-  ln_xml <- if (is_text_shape) {
-    '<a:ln><a:noFill/></a:ln>'
-  } else if (is.null(strk_col) || is.na(strk_col)) {
-    paste0('<a:ln w="', sw_emu, '"><a:noFill/></a:ln>')
-  } else {
-    paste0('<a:ln w="', sw_emu, '"><a:solidFill><a:srgbClr val="', strk_col, '"/></a:solidFill></a:ln>')
+  sw_emu     <- as.integer(stroke_width_pt * 12700)
+  stroke_val <- if (!is.na(stroke_hex)) stroke_hex else default_stroke
+  stroke_xml <- paste0(
+    "<a:ln w=\"", sw_emu, "\">",
+    "<a:solidFill><a:srgbClr val=\"", stroke_val, "\"/></a:solidFill>",
+    "</a:ln>"
+  )
+
+  shape_name <- nd$shape %||% "rect"
+  prst       <- .shape_map[shape_name]
+  if (is.na(prst)) prst <- "rect"
+
+  if (identical(shape_name, "text")) {
+    fill_xml   <- "<a:noFill/>"
+    stroke_xml <- "<a:ln w=\"0\"><a:noFill/></a:ln>"
   }
 
-  # Text colour XML
-  text_col_xml <- if (!is.null(text_col) && !is.na(text_col)) {
-    paste0('<a:solidFill><a:srgbClr val="', text_col, '"/></a:solidFill>')
-  } else {
-    '<a:solidFill><a:srgbClr val="000000"/></a:solidFill>'
-  }
+  geom_xml <- paste0("<a:prstGeom prst=\"", prst, "\"><a:avLst/></a:prstGeom>")
 
-  # Label — already stripped of HTML by parser
-  label_safe <- xml_escape(if (!is.null(node$label) && !is.na(node$label)) node$label else node$id)
+  label    <- xml_escape(strip_html(nd$label %||% nd$id %||% ""))
+  text_col <- nd$color %||%
+    if (!is_transparent && !is.na(fill_hex) && is_dark(fill_hex)) "FFFFFF"
+    else default_text_color
 
-  # Metadata JSON for round-trip
-  meta <- jsonlite::toJSON(
-    list(
-      v     = "1",
-      type  = "node",
-      id    = node$id,
-      label = if (!is.null(node$label) && !is.na(node$label)) node$label else node$id,
-      shape = shape_key,
-      class = if (!is.null(node$class)  && !is.na(node$class))  node$class  else ""
-    ),
-    auto_unbox = TRUE
+  inner <- paste0(
+    "<wps:wsp>",
+      "<wps:cNvSpPr><a:spLocks noChangeArrowheads=\"1\"/></wps:cNvSpPr>",
+      "<wps:spPr>",
+        "<a:xfrm><a:off x=\"0\" y=\"0\"/>",
+          "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/></a:xfrm>",
+        geom_xml, fill_xml, stroke_xml,
+      "</wps:spPr>",
+      "<wps:txbx><w:txbxContent><w:p>",
+        "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
+        "<w:r><w:rPr><w:color w:val=\"", text_col, "\"/></w:rPr>",
+          "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
+      "</w:p></w:txbxContent></wps:txbx>",
+      "<wps:bodyPr anchor=\"ctr\" lIns=\"91440\" rIns=\"91440\" ",
+        "tIns=\"45720\" bIns=\"45720\"><a:normAutofit/></wps:bodyPr>",
+    "</wps:wsp>"
   )
 
-  name_attr <- paste0("mermaid:node:", node$id)
+  descr <- jsonlite::toJSON(list(
+    v = "1", type = "node",
+    id = nd$id %||% "", label = nd$label %||% "",
+    shape = shape_name, class = nd$class %||% NULL
+  ), auto_unbox = TRUE, null = "null")
 
-  inner_xml <- paste0(
-    '<wps:wsp>',
-    '<wps:cNvPr id="', shape_id, '" name="', xml_escape(name_attr), '"/>',
-    '<wps:cNvSpPr><a:spLocks noChangeArrowheads="1"/></wps:cNvSpPr>',
-    '<wps:spPr>',
-    '<a:xfrm>',
-    '<a:off x="', inches_to_emu(node$x), '" y="', inches_to_emu(node$y), '"/>',
-    '<a:ext cx="', inches_to_emu(node$width), '" cy="', inches_to_emu(node$height), '"/>',
-    '</a:xfrm>',
-    '<a:prstGeom prst="', prst, '"><a:avLst/></a:prstGeom>',
-    fill_xml,
-    ln_xml,
-    '</wps:spPr>',
-    '<wps:txbx>',
-    '<w:txbxContent>',
-    '<w:p>',
-    '<w:pPr><w:jc w:val="center"/></w:pPr>',
-    '<w:r>',
-    '<w:rPr>',
-    '<w:color w:val="', if (!is.null(text_col) && !is.na(text_col)) text_col else "000000", '"/>',
-    '<w:sz w:val="16"/><w:szCs w:val="16"/>',
-    '</w:rPr>',
-    '<w:t xml:space="preserve">', label_safe, '</w:t>',
-    '</w:r>',
-    '</w:p>',
-    '</w:txbxContent>',
-    '</wps:txbx>',
-    '<wps:bodyPr anchor="ctr" anchorCtr="1" vert="horz">',
-    '<a:noAutofit/>',
-    '</wps:bodyPr>',
-    '</wps:wsp>'
-  )
-
-  make_anchor(
-    x_in      = node$x,
-    y_in      = node$y,
-    w_in      = node$width,
-    h_in      = node$height,
-    shape_id  = shape_id,
-    name      = name_attr,
-    descr_json = meta,
-    z_order   = 251658240L,
-    inner_xml = inner_xml
-  )
+  make_anchor(x_emu, y_emu, w_emu, h_emu, shape_id,
+              name       = paste0("mermaid:node:", nd$id %||% ""),
+              descr_json = descr,
+              z_order    = 251658240L,
+              inner_xml  = inner)
 }
 
-# Edge XML builder -------------------------------------------------------------
+# ── Edge shapes (custGeom from dagre bezier path) ──────────────────────────
 
-edge_to_xml <- function(edge, shape_id, default_stroke, stroke_width_pt) {
-  # If coords are missing, skip
-  if (is.null(edge$x1) || is.na(edge$x1) ||
-      is.null(edge$y1) || is.na(edge$y1) ||
-      is.null(edge$x2) || is.na(edge$x2) ||
-      is.null(edge$y2) || is.na(edge$y2)) {
-    return("")
+edge_shape_xml <- function(e, shape_id, vb, scale, off_x, off_y,
+                            default_stroke, stroke_width_pt) {
+  path_d <- e$path_d %||% ""
+  if (!nzchar(path_d)) return("")
+
+  cg <- svg_path_to_custgeom(path_d, scale)
+  if (is.null(cg)) return("")
+
+  # Shift from SVG coordinate space to page EMU
+  x_emu <- cg$x_emu - as.integer(round(vb[1] * scale)) + off_x
+  y_emu <- cg$y_emu - as.integer(round(vb[2] * scale)) + off_y
+  w_emu <- cg$w_emu
+  h_emu <- cg$h_emu
+
+  lt       <- e$line_type %||% "solid"
+  sw_pt    <- if (identical(lt, "thick")) stroke_width_pt * 2 else stroke_width_pt
+  sw_emu   <- as.integer(sw_pt * 12700)
+  dash_xml <- if (identical(lt, "dashed")) "<a:prstDash val=\"dash\"/>" else ""
+
+  make_end <- function(type, which) {
+    type <- type %||% "none"
+    if (type == "arrow")  return(paste0("<a:", which, "End type=\"arrow\" w=\"med\" len=\"med\"/>"))
+    if (type == "circle") return(paste0("<a:", which, "End type=\"oval\"/>"))
+    if (type == "cross")  return(paste0("<a:", which, "End type=\"diamond\"/>"))
+    paste0("<a:", which, "End type=\"none\"/>")
   }
 
-  x1 <- edge$x1; y1 <- edge$y1
-  x2 <- edge$x2; y2 <- edge$y2
-
-  # Bounding box
-  box_x <- min(x1, x2)
-  box_y <- min(y1, y2)
-  box_w <- abs(x2 - x1)
-  box_h <- abs(y2 - y1)
-
-  # Ensure minimum size
-  box_w <- max(box_w, 0.01)
-  box_h <- max(box_h, 0.01)
-
-  flipH <- x1 > x2
-  flipV <- y1 > y2
-
-  # Stroke colour
-  strk_col <- if (!is.null(default_stroke) && !is.na(default_stroke)) default_stroke else "4472C4"
-
-  # Stroke width in EMU
-  sw_emu <- as.integer(round(stroke_width_pt * 12700))
-
-  # Dashed line
-  dash_xml <- if (!is.null(edge$line_type) && !is.na(edge$line_type) && edge$line_type == "dashed") {
-    '<a:prstDash val="dash"/>'
-  } else {
-    ""
-  }
-
-  # Arrow end helper
-  arrow_end_xml <- function(end_type, tag) {
-    if (is.null(end_type) || is.na(end_type)) end_type <- "none"
-    type_attr <- switch(end_type,
-      arrow  = "arrow",
-      circle = "oval",
-      cross  = "diamond",
-      "none"
-    )
-    if (type_attr == "none") {
-      paste0('<a:', tag, ' type="none"/>')
-    } else {
-      paste0('<a:', tag, ' type="', type_attr, '" w="med" len="med"/>')
-    }
-  }
-
-  head_xml <- arrow_end_xml(edge$arrow_start, "headEnd")
-  tail_xml <- arrow_end_xml(edge$arrow_end,   "tailEnd")
-
-  # Metadata JSON
-  meta <- jsonlite::toJSON(
-    list(
-      v          = "1",
-      type       = "edge",
-      from       = edge$from,
-      to         = edge$to,
-      label      = if (!is.null(edge$label) && !is.na(edge$label)) edge$label else "",
-      line       = if (!is.null(edge$line_type)   && !is.na(edge$line_type))   edge$line_type   else "solid",
-      arrow_start = if (!is.null(edge$arrow_start) && !is.na(edge$arrow_start)) edge$arrow_start else "none",
-      arrow_end  = if (!is.null(edge$arrow_end)   && !is.na(edge$arrow_end))   edge$arrow_end   else "arrow"
-    ),
-    auto_unbox = TRUE
+  inner <- paste0(
+    "<wps:wsp>",
+      "<wps:cNvCnPr/>",
+      "<wps:spPr>",
+        "<a:xfrm><a:off x=\"0\" y=\"0\"/>",
+          "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/></a:xfrm>",
+        cg$xml,
+        "<a:noFill/>",
+        "<a:ln w=\"", sw_emu, "\">",
+          "<a:solidFill><a:srgbClr val=\"", default_stroke, "\"/></a:solidFill>",
+          dash_xml,
+          make_end(e$arrow_start, "head"),
+          make_end(e$arrow_end,   "tail"),
+        "</a:ln>",
+      "</wps:spPr>",
+      "<wps:bodyPr/>",
+    "</wps:wsp>"
   )
 
-  name_attr <- paste0("mermaid:edge:", edge$from, ":", edge$to)
+  descr <- jsonlite::toJSON(list(
+    v = "1", type = "edge",
+    from = e$from %||% NULL, to = e$to %||% NULL,
+    label = e$label %||% NULL, line = lt,
+    arrow_start = e$arrow_start %||% "none",
+    arrow_end   = e$arrow_end   %||% "arrow"
+  ), auto_unbox = TRUE, null = "null")
 
-  flip_attr <- ""
-  if (flipH && flipV) flip_attr <- ' flipH="1" flipV="1"'
-  else if (flipH)     flip_attr <- ' flipH="1"'
-  else if (flipV)     flip_attr <- ' flipV="1"'
-
-  inner_xml <- paste0(
-    '<wps:wsp>',
-    '<wps:cNvPr id="', shape_id, '" name="', xml_escape(name_attr), '"/>',
-    '<wps:cNvCnPr/>',
-    '<wps:spPr>',
-    '<a:xfrm', flip_attr, '>',
-    '<a:off x="', inches_to_emu(box_x), '" y="', inches_to_emu(box_y), '"/>',
-    '<a:ext cx="', inches_to_emu(box_w), '" cy="', inches_to_emu(box_h), '"/>',
-    '</a:xfrm>',
-    '<a:prstGeom prst="line"><a:avLst/></a:prstGeom>',
-    '<a:noFill/>',
-    '<a:ln w="', sw_emu, '">',
-    '<a:solidFill><a:srgbClr val="', strk_col, '"/></a:solidFill>',
-    dash_xml,
-    head_xml,
-    tail_xml,
-    '</a:ln>',
-    '</wps:spPr>',
-    '<wps:bodyPr/>',
-    '</wps:wsp>'
-  )
-
-  make_anchor(
-    x_in      = box_x,
-    y_in      = box_y,
-    w_in      = box_w,
-    h_in      = box_h,
-    shape_id  = shape_id,
-    name      = name_attr,
-    descr_json = meta,
-    z_order   = 251658241L,
-    inner_xml = inner_xml
-  )
+  make_anchor(x_emu, y_emu, w_emu, h_emu, shape_id,
+              name       = paste0("mermaid:edge:",
+                                  e$from %||% "?", "\u2192", e$to %||% "?"),
+              descr_json = descr,
+              z_order    = 251659000L,
+              inner_xml  = inner)
 }
 
-# Edge label text box ----------------------------------------------------------
+# ── Edge label text boxes ──────────────────────────────────────────────────
 
-edge_label_to_xml <- function(edge, shape_id, default_text_color) {
-  if (is.null(edge$label) || is.na(edge$label) || !nzchar(edge$label)) return("")
-  if (is.null(edge$x1) || is.na(edge$x1) || is.null(edge$x2) || is.na(edge$x2)) return("")
-  if (is.null(edge$y1) || is.na(edge$y1) || is.null(edge$y2) || is.na(edge$y2)) return("")
+edge_label_xml <- function(e, shape_id, vb, scale, off_x, off_y,
+                            default_text_color) {
+  lx <- as.numeric(e$label_x %||% NA_real_)
+  ly <- as.numeric(e$label_y %||% NA_real_)
+  if (is.na(lx) || is.na(ly)) return("")
 
-  mid_x  <- (edge$x1 + edge$x2) / 2
-  mid_y  <- (edge$y1 + edge$y2) / 2
-  lbl_w  <- 1.2
-  lbl_h  <- 0.3
-  box_x  <- mid_x - lbl_w / 2
-  box_y  <- mid_y - lbl_h / 2
+  lbl   <- xml_escape(strip_html(e$label %||% ""))
+  w_emu <- inches_to_emu(1.2)
+  h_emu <- inches_to_emu(0.3)
+  x_emu <- as.integer(round((lx - vb[1]) * scale)) + off_x - w_emu %/% 2L
+  y_emu <- as.integer(round((ly - vb[2]) * scale)) + off_y - h_emu %/% 2L
 
-  text_col <- if (!is.null(default_text_color) && !is.na(default_text_color)) default_text_color else "000000"
-
-  label_safe <- xml_escape(edge$label)
-  name_attr  <- paste0("mermaid:edge_label:", edge$from, ":", edge$to)
-
-  inner_xml <- paste0(
-    '<wps:wsp>',
-    '<wps:cNvPr id="', shape_id, '" name="', xml_escape(name_attr), '"/>',
-    '<wps:cNvSpPr txBox="1"><a:spLocks noChangeArrowheads="1"/></wps:cNvSpPr>',
-    '<wps:spPr>',
-    '<a:xfrm>',
-    '<a:off x="', inches_to_emu(box_x), '" y="', inches_to_emu(box_y), '"/>',
-    '<a:ext cx="', inches_to_emu(lbl_w), '" cy="', inches_to_emu(lbl_h), '"/>',
-    '</a:xfrm>',
-    '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
-    '<a:noFill/>',
-    '<a:ln><a:noFill/></a:ln>',
-    '</wps:spPr>',
-    '<wps:txbx>',
-    '<w:txbxContent>',
-    '<w:p>',
-    '<w:pPr><w:jc w:val="center"/></w:pPr>',
-    '<w:r>',
-    '<w:rPr>',
-    '<w:color w:val="', text_col, '"/>',
-    '<w:sz w:val="14"/><w:szCs w:val="14"/>',
-    '</w:rPr>',
-    '<w:t xml:space="preserve">', label_safe, '</w:t>',
-    '</w:r>',
-    '</w:p>',
-    '</w:txbxContent>',
-    '</wps:txbx>',
-    '<wps:bodyPr anchor="ctr" anchorCtr="1" vert="horz">',
-    '<a:noAutofit/>',
-    '</wps:bodyPr>',
-    '</wps:wsp>'
+  inner <- paste0(
+    "<wps:wsp>",
+      "<wps:cNvSpPr><a:spLocks noChangeArrowheads=\"1\"/></wps:cNvSpPr>",
+      "<wps:spPr>",
+        "<a:xfrm><a:off x=\"0\" y=\"0\"/>",
+          "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/></a:xfrm>",
+        "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>",
+        "<a:noFill/><a:ln w=\"0\"><a:noFill/></a:ln>",
+      "</wps:spPr>",
+      "<wps:txbx><w:txbxContent><w:p>",
+        "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
+        "<w:r><w:rPr><w:color w:val=\"", default_text_color, "\"/>",
+          "<w:sz w:val=\"16\"/></w:rPr>",
+          "<w:t xml:space=\"preserve\">", lbl, "</w:t></w:r>",
+      "</w:p></w:txbxContent></wps:txbx>",
+      "<wps:bodyPr anchor=\"ctr\"><a:normAutofit/></wps:bodyPr>",
+    "</wps:wsp>"
   )
 
-  make_anchor(
-    x_in      = box_x,
-    y_in      = box_y,
-    w_in      = lbl_w,
-    h_in      = lbl_h,
-    shape_id  = shape_id,
-    name      = name_attr,
-    descr_json = "{}",
-    z_order   = 251658242L,
-    inner_xml = inner_xml
-  )
+  make_anchor(x_emu, y_emu, w_emu, h_emu, shape_id,
+              name       = paste0("mermaid:edge_label:",
+                                  e$from %||% "", ":", e$to %||% ""),
+              descr_json = "{}",
+              z_order    = 251660000L,
+              inner_xml  = inner)
 }
 
-# Subgraph XML builder ---------------------------------------------------------
+# ── Colour helpers ─────────────────────────────────────────────────────────
 
-subgraph_to_xml <- function(sg, nodes_df, shape_id, default_stroke, padding_in = 0.2) {
-  nids <- sg$node_ids
-  if (length(nids) == 0) return("")
-
-  sg_nodes <- nodes_df[nodes_df$id %in% nids, , drop = FALSE]
-  if (nrow(sg_nodes) == 0) return("")
-
-  # Check layout columns present
-  if (!all(c("x", "y", "width", "height") %in% names(sg_nodes))) return("")
-
-  min_x <- min(sg_nodes$x,                     na.rm = TRUE)
-  min_y <- min(sg_nodes$y,                     na.rm = TRUE)
-  max_x <- max(sg_nodes$x + sg_nodes$width,    na.rm = TRUE)
-  max_y <- max(sg_nodes$y + sg_nodes$height,   na.rm = TRUE)
-
-  box_x <- min_x - padding_in
-  box_y <- min_y - padding_in
-  box_w <- (max_x - min_x) + 2 * padding_in
-  box_h <- (max_y - min_y) + 2 * padding_in
-
-  box_w <- max(box_w, 0.1)
-  box_h <- max(box_h, 0.1)
-
-  strk_col <- if (!is.null(sg$stroke) && !is.na(sg$stroke)) sg$stroke else
-    if (!is.null(default_stroke) && !is.na(default_stroke)) default_stroke else "4472C4"
-
-  fill_col <- "F2F2F2"  # very light grey default
-
-  label_safe <- xml_escape(if (!is.null(sg$label) && !is.na(sg$label)) sg$label else sg$id)
-
-  # Metadata JSON
-  meta <- jsonlite::toJSON(
-    list(
-      v     = "1",
-      type  = "subgraph",
-      id    = sg$id,
-      label = if (!is.null(sg$label) && !is.na(sg$label)) sg$label else sg$id,
-      nodes = as.list(nids)
-    ),
-    auto_unbox = TRUE
-  )
-
-  name_attr <- paste0("mermaid:subgraph:", sg$id)
-
-  # Stroke width (1.5pt)
-  sw_emu <- as.integer(round(1.5 * 12700))
-
-  inner_xml <- paste0(
-    '<wps:wsp>',
-    '<wps:cNvPr id="', shape_id, '" name="', xml_escape(name_attr), '"/>',
-    '<wps:cNvSpPr><a:spLocks noChangeArrowheads="1"/></wps:cNvSpPr>',
-    '<wps:spPr>',
-    '<a:xfrm>',
-    '<a:off x="', inches_to_emu(box_x), '" y="', inches_to_emu(box_y), '"/>',
-    '<a:ext cx="', inches_to_emu(box_w), '" cy="', inches_to_emu(box_h), '"/>',
-    '</a:xfrm>',
-    '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>',
-    '<a:solidFill><a:srgbClr val="', fill_col, '"/></a:solidFill>',
-    '<a:ln w="', sw_emu, '">',
-    '<a:solidFill><a:srgbClr val="', strk_col, '"/></a:solidFill>',
-    '<a:prstDash val="dash"/>',
-    '</a:ln>',
-    '</wps:spPr>',
-    '<wps:txbx>',
-    '<w:txbxContent>',
-    '<w:p>',
-    '<w:pPr><w:jc w:val="left"/></w:pPr>',
-    '<w:r>',
-    '<w:rPr>',
-    '<w:color w:val="', strk_col, '"/>',
-    '<w:b/>',
-    '<w:sz w:val="14"/><w:szCs w:val="14"/>',
-    '</w:rPr>',
-    '<w:t xml:space="preserve">', label_safe, '</w:t>',
-    '</w:r>',
-    '</w:p>',
-    '</w:txbxContent>',
-    '</wps:txbx>',
-    '<wps:bodyPr anchor="t" anchorCtr="0" vert="horz">',
-    '<a:noAutofit/>',
-    '</wps:bodyPr>',
-    '</wps:wsp>'
-  )
-
-  make_anchor(
-    x_in      = box_x,
-    y_in      = box_y,
-    w_in      = box_w,
-    h_in      = box_h,
-    shape_id  = shape_id,
-    name      = name_attr,
-    descr_json = meta,
-    z_order   = 2000000L,
-    inner_xml = inner_xml
-  )
-}
-
-# Main exported function -------------------------------------------------------
-
-#' Build DrawingML XML for a laid-out mermaid_graph
-#'
-#' @param graph A laid-out `mermaid_graph` (from [calculate_layout()]).
-#' @param start_id Integer starting shape ID. Increment between diagrams.
-#' @param default_fill Default node fill colour (6-char hex). Default "FFFFFF".
-#' @param default_stroke Default stroke colour. Default "4472C4".
-#' @param default_text_color Default text colour. Default "000000".
-#' @param stroke_width_pt Stroke width in points. Default 1.5.
-#' @return Named list: `xml` (character) and `next_id` (integer).
-#' @export
-build_diagram_xml <- function(graph,
-                               start_id           = 1L,
-                               default_fill       = "FFFFFF",
-                               default_stroke     = "4472C4",
-                               default_text_color = "000000",
-                               stroke_width_pt    = 1.5) {
-  nodes     <- graph$nodes
-  edges     <- graph$edges
-  subgraphs <- graph$subgraphs
-  shape_id  <- as.integer(start_id)
-  parts     <- character(0)
-
-  # 1. Subgraphs (z-order 2000000 - behind nodes)
-  if (nrow(subgraphs) > 0) {
-    for (i in seq_len(nrow(subgraphs))) {
-      sg          <- as.list(subgraphs[i, ])
-      sg$node_ids <- subgraphs$node_ids[[i]]
-      xml_str     <- subgraph_to_xml(sg, nodes, shape_id, default_stroke)
-      if (nzchar(xml_str)) {
-        parts    <- c(parts, xml_str)
-        shape_id <- shape_id + 1L
-      }
-    }
-  }
-
-  # 2. Nodes
-  if (nrow(nodes) > 0) {
-    for (i in seq_len(nrow(nodes))) {
-      nd      <- as.list(nodes[i, ])
-      xml_str <- node_to_xml(nd, shape_id, default_fill, default_stroke,
-                              default_text_color, stroke_width_pt)
-      parts    <- c(parts, xml_str)
-      shape_id <- shape_id + 1L
-    }
-  }
-
-  # 3. Edges + optional edge labels
-  if (nrow(edges) > 0) {
-    for (i in seq_len(nrow(edges))) {
-      e       <- as.list(edges[i, ])
-      xml_str <- edge_to_xml(e, shape_id, default_stroke, stroke_width_pt)
-      if (nzchar(xml_str)) {
-        parts    <- c(parts, xml_str)
-        shape_id <- shape_id + 1L
-      }
-      if (!is.null(e$label) && !is.na(e$label) && nzchar(e$label)) {
-        lxml <- edge_label_to_xml(e, shape_id, default_text_color)
-        if (nzchar(lxml)) {
-          parts    <- c(parts, lxml)
-          shape_id <- shape_id + 1L
-        }
-      }
-    }
-  }
-
-  xml <- paste0(
-    '<w:p ', .dml_namespaces, '>',
-    paste0(parts, collapse = ""),
-    '</w:p>'
-  )
-
-  list(xml = xml, next_id = shape_id)
+is_dark <- function(hex) {
+  if (is.na(hex) || nchar(hex) < 6L) return(FALSE)
+  r   <- strtoi(substr(hex, 1L, 2L), 16L)
+  g   <- strtoi(substr(hex, 3L, 4L), 16L)
+  b   <- strtoi(substr(hex, 5L, 6L), 16L)
+  (0.299 * r + 0.587 * g + 0.114 * b) < 128
 }

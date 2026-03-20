@@ -10,7 +10,8 @@ vignette: >
 ```{r, include = FALSE}
 knitr::opts_chunk$set(
   collapse = TRUE,
-  comment = "#>"
+  comment = "#>",
+  eval = FALSE   # all chunks require Node.js + setup_mermaid2drawml()
 )
 ```
 
@@ -25,26 +26,32 @@ into natively editable Microsoft Word shapes (DrawingML `wps:wsp` format). Unlik
 embedding a static image, the resulting shapes can be selected, moved, resized,
 and reformatted directly inside Word.
 
-The package integrates with the [officer](https://davidgohel.github.io/officer/)
-package, making it easy to insert diagrams programmatically into `.docx` files
-— for example, from R Markdown reports.
+Layout and SVG rendering are delegated to the official
+[Mermaid CLI](https://github.com/mermaid-js/mermaid-cli) (`@mermaid-js/mermaid-cli`),
+so Word output matches what you see in a browser. The package integrates with
+[officer](https://davidgohel.github.io/officer/), making it easy to insert
+diagrams from R Markdown reports.
 
-## Installation
+## Setup
 
-```r
-# Install from source
-install.packages("mermaid2drawml", repos = NULL, type = "source")
+Install Node.js (≥ 18) and npm, then run once after installing the R package:
 
-# Or via pak/remotes if published to a repository
-pak::pak("mermaid2drawml")
+```{r setup_node}
+setup_mermaid2drawml()
+```
+
+You can verify the installation at any time:
+
+```{r check_node}
+check_mermaid2drawml()
 ```
 
 ## Basic Usage
 
 ### `mermaid_to_word()`
 
-The primary function parses Mermaid syntax, calculates a Sugiyama hierarchical
-layout, and builds DrawingML XML:
+The primary function renders Mermaid syntax via the Node.js bridge and builds
+DrawingML XML:
 
 ```{r basic}
 diagram <- mermaid_to_word(
@@ -60,15 +67,16 @@ print(diagram)
 
 The returned `mermaid_word_diagram` object contains:
 
-- `$xml` — the raw DrawingML XML string
-- `$graph` — the parsed and laid-out `mermaid_graph`
+- `$xml` — the raw DrawingML XML string ready for `officer::body_add_xml()`
+- `$svg_data` — parsed SVG geometry (nodes, edges, viewbox)
+- `$ast` — the Mermaid JSON AST from `@mermaid-js/parser`
 - `$next_id` — the next available shape ID (needed when adding multiple diagrams)
 
 ### `body_add_mermaid()`
 
 For direct insertion into a Word document:
 
-```{r body_add, eval = FALSE}
+```{r body_add}
 library(officer)
 
 doc <- read_docx() |>
@@ -91,7 +99,7 @@ file must be a Word document (use `output: word_document`):
 output: word_document
 ---
 
-# In an R chunk within the Rmd:
+```{r diagram, echo=FALSE}
 library(officer)
 library(mermaid2drawml)
 
@@ -104,41 +112,40 @@ read_docx() |>
   body_add_mermaid(my_diagram) |>
   print(target = knitr::fig_path(".docx"))
 ```
+```
 
 > **Note**: `knitr::fig_path()` generates a unique path per chunk, avoiding
 > collisions when multiple diagrams appear in the same document.
 
-## Layout Options
+## Layout and Sizing Options
 
-`calculate_layout()` (called internally by `mermaid_to_word()`) accepts several
-parameters that control diagram sizing and spacing:
+`build_diagram_xml()` (called internally) accepts parameters that control how
+the SVG is fitted to the page. Pass these through `...` in `mermaid_to_word()`
+or `body_add_mermaid()`:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `page_width_in` | 6.0 | Usable diagram width (inches) |
 | `page_height_in` | 8.0 | Maximum diagram height (inches) |
-| `node_w_in` | 1.4 | Node width (inches) |
-| `node_h_in` | 0.55 | Node height (inches) |
-| `h_gap_in` | 0.3 | Horizontal gap between nodes |
-| `v_gap_in` | 0.4 | Vertical gap between ranks |
 | `margin_in` | 1.0 | Page margin offset (inches) |
+| `default_fill` | `"FFFFFF"` | Default node fill colour (hex) |
+| `default_stroke` | `"4472C4"` | Default stroke colour (hex) |
+| `stroke_width_pt` | 1.5 | Stroke width in points |
 
-Pass these through `...` in `mermaid_to_word()` or `body_add_mermaid()`:
-
-```{r layout_opts, eval = FALSE}
+```{r layout_opts}
 diagram <- mermaid_to_word(
   "flowchart LR\n  A --> B --> C",
-  node_w_in = 2.0,
-  h_gap_in  = 0.5
+  page_width_in = 5.0,
+  margin_in     = 0.5
 )
 ```
 
 ## Multi-Diagram Documents
 
-When adding multiple diagrams to a single document, you must chain the `start_id`
-/ `next_id` values to avoid shape ID collisions (Word requires unique IDs):
+When adding multiple diagrams to a single document, chain `start_id` / `next_id`
+to avoid shape ID collisions (Word requires unique IDs):
 
-```{r multi_diagram, eval = FALSE}
+```{r multi_diagram}
 library(officer)
 
 d1 <- mermaid_to_word(
@@ -159,44 +166,22 @@ doc <- read_docx() |>
 print(doc, target = "multi.docx")
 ```
 
-Alternatively, use `body_add_mermaid()` with explicit `start_id` tracking:
-
-```{r multi_body, eval = FALSE}
-library(officer)
-
-next_id <- 1L
-
-add_diagram <- function(doc, code) {
-  d       <- mermaid_to_word(code, start_id = next_id)
-  next_id <<- d$next_id
-  officer::body_add_xml(doc, d$xml)
-}
-
-doc <- read_docx() |>
-  add_diagram("flowchart TB\n  A --> B") |>
-  add_diagram("flowchart LR\n  C --> D")
-
-print(doc, target = "multi.docx")
-```
-
 ## Supported Mermaid Syntax
 
-The parser handles the following features:
+The package supports the full feature set of `@mermaid-js/mermaid-cli`, including:
 
 - **Directions**: `TB`, `TD`, `LR`, `BT`, `RL`
 - **Node shapes**: `[rect]`, `(roundRect)`, `{diamond}`, `((ellipse))`,
-  `{{hexagon}}`, `[/parallelogram/]`
+  `{{hexagon}}`, `[(cylinder)]`, `@{shape: ...}` (v10 shapes)
 - **Edge types**: `-->` (arrow), `---` (line), `-.->` (dashed), `<-->` (bidirectional),
   `o--o` (circle ends), `x--x` (cross ends), `==>` (thick)
-- **Edge labels**: `-->|label|` (pipe syntax) and inline `-- label -->`
+- **Edge labels**: `-->|label|` and inline `-- label -->`
 - **Chained edges**: `A --> B --> C`
 - **Subgraphs**
-- **classDef** style definitions with `fill`, `stroke`, `color`, `stroke-width`
-- **class** assignments
+- **`classDef`** style definitions with `fill`, `stroke`, `color`
 - **Comments**: `%% ...`
-- **v10 shapes**: `M1@{shape: text, label: "..."}`
 
-## Notes on Round-Trip Capability
+## Round-Trip Metadata
 
 Each shape and connector in the generated Word document stores JSON metadata in
 its `wp:docPr descr` attribute. This metadata records the original Mermaid
