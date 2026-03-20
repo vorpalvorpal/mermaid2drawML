@@ -284,18 +284,38 @@ extract_node_label <- function(g) {
 }
 
 extract_text_color <- function(shape_el, g) {
-  # Mermaid classDefs set `color:#XXXXXX` which controls text colour.
-  # This is emitted as a CSS `color:` property in the inline style of the
-  # shape element (and sometimes the group), distinct from `fill:`.
-  # Fall back to the fill of any <text> child (SVG text colour = fill).
-  for (el in list(shape_el, g)) {
-    style <- xml2::xml_attr(el, "style") %||% ""
-    m <- regmatches(style, regexpr("(?:^|;)\\s*color:\\s*([^;]+)", style, perl = TRUE))
+  # Mermaid classDefs set `color:#XXXXXX` which ends up as a CSS `color:`
+  # property on the inner <g class="label"> child, NOT on the outer node <g>
+  # or the shape element itself. Check elements in priority order:
+  #   1. <g class="label"> style (most reliable for classDef colour)
+  #   2. <foreignObject> / <span> descendant style (htmlLabels:true)
+  #   3. <text> fill attribute (htmlLabels:false fallback)
+
+  # 1. Inner label group
+  label_g <- xml2::xml_find_first(g, ".//*[contains(@class,'label')][@style]")
+  if (!inherits(label_g, "xml_missing")) {
+    style <- xml2::xml_attr(label_g, "style") %||% ""
+    m <- regmatches(style, regexpr("(?:^|;|\\s)color:\\s*([^;!]+)", style, perl = TRUE))
     if (length(m) > 0L) {
       col <- trimws(sub(".*color:\\s*", "", m))
       if (nzchar(col) && col != "none") return(parse_css_colour(col))
     }
   }
+
+  # 2. <span> or <div> inside foreignObject
+  for (tag in c("span", "div")) {
+    el <- xml2::xml_find_first(g, paste0(".//", tag, "[@style]"))
+    if (!inherits(el, "xml_missing")) {
+      style <- xml2::xml_attr(el, "style") %||% ""
+      m <- regmatches(style, regexpr("(?:^|;|\\s)color:\\s*([^;!]+)", style, perl = TRUE))
+      if (length(m) > 0L) {
+        col <- trimws(sub(".*color:\\s*", "", m))
+        if (nzchar(col) && col != "none") return(parse_css_colour(col))
+      }
+    }
+  }
+
+  # 3. <text> fill (SVG text colour = fill, used when htmlLabels:false)
   txt_el <- xml2::xml_find_first(g, ".//text")
   if (!inherits(txt_el, "xml_missing")) {
     style <- xml2::xml_attr(txt_el, "style") %||% ""
@@ -307,6 +327,7 @@ extract_text_color <- function(shape_el, g) {
     fa <- xml2::xml_attr(txt_el, "fill") %||% ""
     if (nzchar(fa) && fa != "none") return(parse_css_colour(fa))
   }
+
   NA_character_
 }
 
