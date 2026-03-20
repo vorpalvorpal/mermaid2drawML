@@ -63,3 +63,4 @@ render_mermaid <- function(mermaid_code, timeout = 120L) {
 
   out
 }
+

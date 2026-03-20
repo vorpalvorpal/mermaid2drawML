@@ -9,7 +9,18 @@
       "Bash(Rscript -e \"pkgs <- c\\(''devtools'',''usethis'',''roxygen2'',''testthat'',''withr''\\); for \\(p in pkgs\\) { v <- tryCatch\\(as.character\\(packageVersion\\(p\\)\\), error=function\\(e\\) ''NOT INSTALLED''\\); cat\\(p, '':'', v, ''\\\\n''\\) }\")",
       "Bash(find /Users/rjs/Documents/mermaid2drawML -type f -name *.json -o -name *.yml -o -name *.yaml -o -name Makefile -o -name .env* -o -name Procfile -o -name *.py -o -name *.R)",
       "Bash(grep -E '\\\\.\\(json|yml|yaml|js|py|R|env\\)$|Makefile|Procfile')",
-      "Bash(R -e \"devtools::check\\(''''.'''', cran=FALSE\\)\")"
+      "Bash(R -e \"devtools::check\\(''''.'''', cran=FALSE\\)\")",
+      "Bash(Rscript -e \"devtools::load_all\\(quiet=TRUE\\); testthat::test_file\\(''tests/testthat/test-parse_svg.R''\\)\")",
+      "Bash(Rscript -e \"devtools::load_all\\(quiet=TRUE\\); testthat::test_file\\(''''tests/testthat/test-parse_svg.R''''\\)\")",
+      "Bash(Rscript -e \"devtools::check\\(\\)\")",
+      "Bash(Rscript -e \"devtools::document\\(\\)\")",
+      "Bash(Rscript -e \"devtools::load_all\\(quiet=TRUE\\); setup_mermaid2drawml\\(\\)\")",
+      "Bash(Rscript -e \":*)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(''''type:'''', d.get\\(''''type'''',''''cjs''''\\)\\); print\\(''''main:'''', d.get\\(''''main'''',''''none''''\\)\\); print\\(''''exports:'''', list\\(d.get\\(''''exports'''',{}\\).keys\\(\\)\\)[:5]\\)\")",
+      "Bash(Rscript -e \"devtools::test\\(\\)\")",
+      "Bash(Rscript -e \"devtools::document\\(quiet=TRUE\\)\")",
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ]
   }
 }

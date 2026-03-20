@@ -29,10 +29,11 @@ parse_mermaid_svg <- function(svg, ast = NULL) {
   xml2::xml_ns_strip(doc)                  # drop SVG namespace for easier xpath
 
   vb      <- parse_viewbox(doc)
+  style   <- extract_svg_style(doc)
   nodes   <- extract_nodes(doc, ast)
   edges   <- extract_edges(doc, nodes)
 
-  list(nodes = nodes, edges = edges, viewbox = vb)
+  list(nodes = nodes, edges = edges, viewbox = vb, style = style)
 }
 
 # ── viewBox ────────────────────────────────────────────────────────────────
@@ -46,6 +47,57 @@ parse_viewbox <- function(doc) {
     return(c(0, 0, w, h))
   }
   as.numeric(strsplit(trimws(vb_str), "[,\\s]+", perl = TRUE)[[1]])
+}
+
+# ── SVG stylesheet extraction ─────────────────────────────────────────────
+
+# Reads the SVG <style> block for values that mermaid sets via CSS classes
+# rather than inline attributes, so they would otherwise be invisible to the
+# attribute-level parsers below.
+#
+# Returns:
+#   font_size_px   — first font-size: Npx found (drives scaled Word font size)
+#   edge_stroke    — 6-char hex from .flowchart-link { stroke: ... }
+#   edge_sw_px     — stroke-width in px from .flowchart-link { stroke-width: ... }
+
+extract_svg_style <- function(doc) {
+  style_text <- ""
+  style_el   <- xml2::xml_find_first(doc, ".//style")
+  if (!inherits(style_el, "xml_missing")) style_text <- xml2::xml_text(style_el)
+
+  # Font size ---------------------------------------------------------------
+  font_size_px <- 14   # mermaid default when no %%{init}%% block is present
+  m <- regmatches(style_text,
+    regexpr("font-size:\\s*(\\d+(?:\\.\\d+)?)px", style_text, perl = TRUE))
+  if (length(m) > 0L) {
+    fs <- suppressWarnings(as.numeric(sub("px$", "", sub(".*font-size:\\s*", "", m[[1]]))))
+    if (!is.na(fs) && fs > 0) font_size_px <- fs
+  }
+
+  # Edge line colour --------------------------------------------------------
+  # Mermaid emits:  .flowchart-link { stroke: #RRGGBB; fill: none; }
+  edge_stroke <- "5E504E"   # Bark grey — mermaid's default lineColor
+  m <- regmatches(style_text,
+    regexpr("\\.flowchart-link[^{]*\\{[^}]*stroke\\s*:\\s*#([0-9A-Fa-f]{6})",
+            style_text, perl = TRUE))
+  if (length(m) > 0L) {
+    col <- regmatches(m[[1]], regexpr("[0-9A-Fa-f]{6}$", m[[1]], perl = TRUE))
+    if (length(col) > 0L) edge_stroke <- toupper(col)
+  }
+
+  # Edge stroke-width -------------------------------------------------------
+  edge_sw_px <- 2
+  m <- regmatches(style_text,
+    regexpr("\\.flowchart-link[^{]*\\{[^}]*stroke-width\\s*:\\s*(\\d+(?:\\.\\d+)?)px",
+            style_text, perl = TRUE))
+  if (length(m) > 0L) {
+    sw <- suppressWarnings(
+      as.numeric(sub("px.*", "", sub(".*stroke-width\\s*:\\s*", "", m[[1]])))
+    )
+    if (!is.na(sw) && sw > 0) edge_sw_px <- sw
+  }
+
+  list(font_size_px = font_size_px, edge_stroke = edge_stroke, edge_sw_px = edge_sw_px)
 }
 
 # ── Node extraction ────────────────────────────────────────────────────────
@@ -78,6 +130,7 @@ extract_nodes <- function(doc, ast) {
     svg_h    = vapply(rows, `[[`, numeric(1),   "svg_h"),
     fill     = vapply(rows, `[[`, character(1), "fill"),
     stroke   = vapply(rows, `[[`, character(1), "stroke"),
+    color    = vapply(rows, `[[`, character(1), "color"),
     class    = vapply(rows, `[[`, character(1), "class")
   )
 
@@ -102,10 +155,11 @@ parse_one_node <- function(g) {
   shape_el <- find_shape_element(g)
   if (is.null(shape_el)) return(NULL)
 
-  geom  <- element_geometry(shape_el, pos)  # list(shape, svg_cx, svg_cy, svg_w, svg_h)
-  label <- extract_node_label(g)
-  fill  <- extract_fill(shape_el, g)
+  geom   <- element_geometry(shape_el, pos)  # list(shape, svg_cx, svg_cy, svg_w, svg_h)
+  label  <- extract_node_label(g)
+  fill   <- extract_fill(shape_el, g)
   stroke <- extract_stroke(shape_el, g)
+  color  <- extract_text_color(shape_el, g)
 
   # Class name assigned in mermaid (e.g. ":::plan") — found in the g's classes
   # Mermaid adds class names after "default" and known shape-markers
@@ -126,6 +180,7 @@ parse_one_node <- function(g) {
     svg_h  = geom$svg_h,
     fill   = fill   %||% NA_character_,
     stroke = stroke %||% NA_character_,
+    color  = color  %||% NA_character_,
     class  = user_class
   )
 }
@@ -228,6 +283,33 @@ extract_node_label <- function(g) {
   ""
 }
 
+extract_text_color <- function(shape_el, g) {
+  # Mermaid classDefs set `color:#XXXXXX` which controls text colour.
+  # This is emitted as a CSS `color:` property in the inline style of the
+  # shape element (and sometimes the group), distinct from `fill:`.
+  # Fall back to the fill of any <text> child (SVG text colour = fill).
+  for (el in list(shape_el, g)) {
+    style <- xml2::xml_attr(el, "style") %||% ""
+    m <- regmatches(style, regexpr("(?:^|;)\\s*color:\\s*([^;]+)", style, perl = TRUE))
+    if (length(m) > 0L) {
+      col <- trimws(sub(".*color:\\s*", "", m))
+      if (nzchar(col) && col != "none") return(parse_css_colour(col))
+    }
+  }
+  txt_el <- xml2::xml_find_first(g, ".//text")
+  if (!inherits(txt_el, "xml_missing")) {
+    style <- xml2::xml_attr(txt_el, "style") %||% ""
+    m <- regmatches(style, regexpr("(?:^|;)\\s*fill:\\s*([^;]+)", style, perl = TRUE))
+    if (length(m) > 0L) {
+      col <- trimws(sub(".*fill:\\s*", "", m))
+      if (nzchar(col) && col != "none") return(parse_css_colour(col))
+    }
+    fa <- xml2::xml_attr(txt_el, "fill") %||% ""
+    if (nzchar(fa) && fa != "none") return(parse_css_colour(fa))
+  }
+  NA_character_
+}
+
 extract_fill <- function(shape_el, g) {
   # Try inline style first, then fill attribute, then parent g style
   for (el in list(shape_el, g)) {
@@ -289,7 +371,7 @@ empty_nodes_tbl <- function() {
     id = character(), label = character(), shape = character(),
     svg_cx = numeric(), svg_cy = numeric(),
     svg_w = numeric(), svg_h = numeric(),
-    fill = character(), stroke = character(), class = character()
+    fill = character(), stroke = character(), color = character(), class = character()
   )
 }
 

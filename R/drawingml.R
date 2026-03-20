@@ -54,18 +54,27 @@ build_diagram_xml <- function(svg_data,
                                page_height_in     = 8.0,
                                margin_in          = 1.0,
                                default_fill       = "FFFFFF",
-                               default_stroke     = "4472C4",
+                               default_stroke     = "5E504E",
                                default_text_color = "000000",
                                stroke_width_pt    = 1.5) {
 
   nodes  <- svg_data$nodes
   edges  <- svg_data$edges
   vb     <- svg_data$viewbox   # c(minx, miny, svg_w, svg_h)
+  sty    <- svg_data$style %||% list(font_size_px = 14, edge_stroke = default_stroke, edge_sw_px = 2)
 
   svg_w  <- vb[3]; svg_h <- vb[4]
   scale  <- compute_scale(svg_w, svg_h, page_width_in, page_height_in)
   off_x  <- inches_to_emu(margin_in)
   off_y  <- inches_to_emu(margin_in)
+
+  # Scale font size proportionally with the diagram; floor at 8 half-pts (4pt).
+  # scale is in EMU/px; 6350 EMU = 0.5pt, so font_px * scale / 6350 = half-points.
+  font_size_hp <- max(as.integer(round(sty$font_size_px * scale / 6350)), 8L)
+
+  # Edge stroke: colour from SVG stylesheet; width scaled from SVG px, min 0.25pt.
+  edge_stroke  <- sty$edge_stroke %||% default_stroke
+  edge_sw_emu  <- max(as.integer(round(sty$edge_sw_px * scale)), 3175L)
 
   shape_id <- as.integer(start_id)
   parts    <- character(0)
@@ -75,7 +84,7 @@ build_diagram_xml <- function(svg_data,
       nd  <- as.list(nodes[i, ])
       xml <- node_shape_xml(nd, shape_id, vb, scale, off_x, off_y,
                             default_fill, default_stroke, default_text_color,
-                            stroke_width_pt)
+                            stroke_width_pt, font_size_hp)
       if (nzchar(xml)) { parts <- c(parts, xml); shape_id <- shape_id + 1L }
     }
   }
@@ -84,7 +93,7 @@ build_diagram_xml <- function(svg_data,
     for (i in seq_len(nrow(edges))) {
       e   <- as.list(edges[i, ])
       xml <- edge_shape_xml(e, shape_id, vb, scale, off_x, off_y,
-                            default_stroke, stroke_width_pt)
+                            edge_stroke, edge_sw_emu)
       if (nzchar(xml)) { parts <- c(parts, xml); shape_id <- shape_id + 1L }
 
       if (!is.na(e$label %||% NA_character_) &&
@@ -152,7 +161,7 @@ make_anchor <- function(x_emu, y_emu, w_emu, h_emu,
 
 node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
                             default_fill, default_stroke, default_text_color,
-                            stroke_width_pt) {
+                            stroke_width_pt, font_size_hp) {
 
   cx_emu <- as.integer(round((nd$svg_cx - vb[1]) * scale)) + off_x
   cy_emu <- as.integer(round((nd$svg_cy - vb[2]) * scale)) + off_y
@@ -171,7 +180,7 @@ node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
     paste0("<a:solidFill><a:srgbClr val=\"", fill_hex, "\"/></a:solidFill>")
   }
 
-  sw_emu     <- as.integer(stroke_width_pt * 12700)
+  sw_emu     <- max(as.integer(stroke_width_pt * 12700 * scale / 9525), 1588L)
   stroke_val <- if (!is.na(stroke_hex)) stroke_hex else default_stroke
   stroke_xml <- paste0(
     "<a:ln w=\"", sw_emu, "\">",
@@ -205,11 +214,19 @@ node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
       "</wps:spPr>",
       "<wps:txbx><w:txbxContent><w:p>",
         "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-        "<w:r><w:rPr><w:color w:val=\"", text_col, "\"/></w:rPr>",
+        "<w:r><w:rPr>",
+          "<w:color w:val=\"", text_col, "\"/>",
+          "<w:sz w:val=\"", font_size_hp, "\"/>",
+          "<w:szCs w:val=\"", font_size_hp, "\"/>",
+        "</w:rPr>",
           "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
       "</w:p></w:txbxContent></wps:txbx>",
-      "<wps:bodyPr anchor=\"ctr\" lIns=\"91440\" rIns=\"91440\" ",
-        "tIns=\"45720\" bIns=\"45720\"><a:normAutofit/></wps:bodyPr>",
+      "<wps:bodyPr anchor=\"ctr\" ",
+        "lIns=\"", max(as.integer(91440 * scale / 9525), 9144L), "\" ",
+        "rIns=\"", max(as.integer(91440 * scale / 9525), 9144L), "\" ",
+        "tIns=\"", max(as.integer(45720 * scale / 9525), 4572L), "\" ",
+        "bIns=\"", max(as.integer(45720 * scale / 9525), 4572L), "\">",
+        "<a:normAutofit/></wps:bodyPr>",
     "</wps:wsp>"
   )
 
@@ -229,7 +246,7 @@ node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
 # ── Edge shapes (custGeom from dagre bezier path) ──────────────────────────
 
 edge_shape_xml <- function(e, shape_id, vb, scale, off_x, off_y,
-                            default_stroke, stroke_width_pt) {
+                            edge_stroke, edge_sw_emu) {
   path_d <- e$path_d %||% ""
   if (!nzchar(path_d)) return("")
 
@@ -243,15 +260,14 @@ edge_shape_xml <- function(e, shape_id, vb, scale, off_x, off_y,
   h_emu <- cg$h_emu
 
   lt       <- e$line_type %||% "solid"
-  sw_pt    <- if (identical(lt, "thick")) stroke_width_pt * 2 else stroke_width_pt
-  sw_emu   <- as.integer(sw_pt * 12700)
+  sw_emu   <- if (identical(lt, "thick")) as.integer(edge_sw_emu * 2L) else edge_sw_emu
   dash_xml <- if (identical(lt, "dashed")) "<a:prstDash val=\"dash\"/>" else ""
 
   make_end <- function(type, which) {
     type <- type %||% "none"
-    if (type == "arrow")  return(paste0("<a:", which, "End type=\"arrow\" w=\"med\" len=\"med\"/>"))
-    if (type == "circle") return(paste0("<a:", which, "End type=\"oval\"/>"))
-    if (type == "cross")  return(paste0("<a:", which, "End type=\"diamond\"/>"))
+    if (type == "arrow")  return(paste0("<a:", which, "End type=\"arrow\" w=\"sm\" len=\"sm\"/>"))
+    if (type == "circle") return(paste0("<a:", which, "End type=\"oval\" w=\"sm\" len=\"sm\"/>"))
+    if (type == "cross")  return(paste0("<a:", which, "End type=\"diamond\" w=\"sm\" len=\"sm\"/>"))
     paste0("<a:", which, "End type=\"none\"/>")
   }
 
@@ -264,7 +280,7 @@ edge_shape_xml <- function(e, shape_id, vb, scale, off_x, off_y,
         cg$xml,
         "<a:noFill/>",
         "<a:ln w=\"", sw_emu, "\">",
-          "<a:solidFill><a:srgbClr val=\"", default_stroke, "\"/></a:solidFill>",
+          "<a:solidFill><a:srgbClr val=\"", edge_stroke, "\"/></a:solidFill>",
           dash_xml,
           make_end(e$arrow_start, "head"),
           make_end(e$arrow_end,   "tail"),
