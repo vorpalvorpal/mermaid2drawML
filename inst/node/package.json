@@ -2,6 +2,7 @@
   "name": "mermaid2drawml-node",
   "version": "1.0.0",
   "private": true,
+  "type": "module",
   "description": "Node.js dependencies for the mermaid2drawml R package",
   "dependencies": {
     "@mermaid-js/mermaid-cli": "^11.4.2",

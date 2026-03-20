@@ -82,21 +82,20 @@ setup_mermaid2drawml <- function(upgrade = FALSE) {
     ))
   }
 
-  # Verify the bridge script can load its dependencies
+  # Verify key package directories exist on disk.
+  # (@mermaid-js/parser is ESM-only so require() would give a false failure;
+  #  checking the file system is sufficient and more reliable.)
   message("Verifying installation...")
-  verify <- processx::run(
-    "node",
-    c("-e", paste0(
-      "try { require('",
-      file.path(node_dir, "node_modules", "@mermaid-js", "parser"),
-      "'); console.log('ok'); } catch(e) { process.stderr.write(e.message); process.exit(1); }"
-    )),
-    error_on_status = FALSE
-  )
+  parser_dir <- file.path(node_dir, "node_modules", "@mermaid-js", "parser")
+  mmdc_dir   <- file.path(node_dir, "node_modules", "@mermaid-js", "mermaid-cli")
+  bridge_ok  <- file.exists(file.path(node_dir, "mermaid_bridge.js"))
 
-  if (verify$status != 0L || trimws(verify$stdout) != "ok") {
+  if (!dir.exists(parser_dir) || !dir.exists(mmdc_dir) || !bridge_ok) {
     rlang::warn(c(
       "Dependency verification had issues.",
+      i = if (!dir.exists(parser_dir)) paste("Missing:", parser_dir),
+      i = if (!dir.exists(mmdc_dir))   paste("Missing:", mmdc_dir),
+      i = if (!bridge_ok)              paste("Missing bridge script:", .bridge_js()),
       i = "Try running setup_mermaid2drawml() again."
     ))
   } else {
