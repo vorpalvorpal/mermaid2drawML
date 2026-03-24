@@ -366,17 +366,20 @@ extract_text_color <- function(shape_el, g) {
   NA_character_
 }
 
+# Strip the CSS `!important` annotation and surrounding whitespace so that
+# values like "transparent !important" or "#700017 !important" parse cleanly.
+.strip_important <- function(x) trimws(sub("\\s*!important.*$", "", x, perl = TRUE))
+
 extract_fill <- function(shape_el, g) {
-  # Try inline style first, then fill attribute, then parent g style
   for (el in list(shape_el, g)) {
     style <- xml2::xml_attr(el, "style") %||% ""
     m <- regmatches(style, regexpr("(?:^|;)\\s*fill:\\s*([^;]+)", style, perl = TRUE))
     if (length(m) > 0L) {
-      col <- trimws(sub(".*fill:\\s*", "", m))
-      if (nzchar(col) && col != "none") return(parse_css_colour(col))
+      col <- .strip_important(sub(".*fill:\\s*", "", m))
+      if (nzchar(col)) return(parse_css_colour(col))   # "transparent" → NA via named_colours
     }
-    fa <- xml2::xml_attr(el, "fill") %||% ""
-    if (nzchar(fa) && fa != "none") return(parse_css_colour(fa))
+    fa <- .strip_important(xml2::xml_attr(el, "fill") %||% "")
+    if (nzchar(fa)) return(parse_css_colour(fa))
   }
   NA_character_
 }
@@ -386,11 +389,12 @@ extract_stroke <- function(shape_el, g) {
     style <- xml2::xml_attr(el, "style") %||% ""
     m <- regmatches(style, regexpr("(?:^|;)\\s*stroke:\\s*([^;]+)", style, perl = TRUE))
     if (length(m) > 0L) {
-      col <- trimws(sub(".*stroke:\\s*", "", m))
-      if (nzchar(col) && col != "none") return(parse_css_colour(col))
+      col <- .strip_important(sub(".*stroke:\\s*", "", m))
+      # 8-char hex (#RRGGBBAA) — hex_to_drawingml already strips alpha
+      if (nzchar(col) && col != "none" && col != "transparent") return(parse_css_colour(col))
     }
-    sa <- xml2::xml_attr(el, "stroke") %||% ""
-    if (nzchar(sa) && sa != "none") return(parse_css_colour(sa))
+    sa <- .strip_important(xml2::xml_attr(el, "stroke") %||% "")
+    if (nzchar(sa) && sa != "none" && sa != "transparent") return(parse_css_colour(sa))
   }
   NA_character_
 }
@@ -438,7 +442,6 @@ empty_nodes_tbl <- function() {
 # "subSpace" clusters are invisible layout-spacers and are filtered out.
 
 extract_subgraphs <- function(doc, style) {
-  default_fill   <- style$cluster_fill   %||% "FFFFDE"
   default_stroke <- style$cluster_stroke %||% "AAAA33"
 
   gs <- xml2::xml_find_all(doc, ".//g[contains(@class,'cluster')][@id]")
@@ -463,7 +466,7 @@ extract_subgraphs <- function(doc, style) {
     h <- as.numeric(xml2::xml_attr(rect_el, "height")%||% "0")
     if (w <= 0 || h <= 0) return(NULL)
 
-    fill   <- extract_fill(rect_el, g)
+    fill   <- extract_fill(rect_el, g)   # NA → <a:noFill/> (transparent border-only cluster)
     stroke <- extract_stroke(rect_el, g)
 
     # Label text from cluster-label child
@@ -481,7 +484,7 @@ extract_subgraphs <- function(doc, style) {
       svg_y  = y,
       svg_w  = w,
       svg_h  = h,
-      fill   = fill   %||% default_fill,
+      fill   = fill,                         # keep NA for transparent
       stroke = stroke %||% default_stroke,
       class  = user_class
     )
