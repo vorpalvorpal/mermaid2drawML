@@ -155,6 +155,8 @@ extract_nodes <- function(doc, ast) {
     svg_cy   = vapply(rows, `[[`, numeric(1),   "svg_cy"),
     svg_w    = vapply(rows, `[[`, numeric(1),   "svg_w"),
     svg_h    = vapply(rows, `[[`, numeric(1),   "svg_h"),
+    txt_w    = vapply(rows, `[[`, numeric(1),   "txt_w"),
+    txt_h    = vapply(rows, `[[`, numeric(1),   "txt_h"),
     fill     = vapply(rows, `[[`, character(1), "fill"),
     stroke   = vapply(rows, `[[`, character(1), "stroke"),
     color    = vapply(rows, `[[`, character(1), "color"),
@@ -187,6 +189,7 @@ parse_one_node <- function(g) {
   fill   <- extract_fill(shape_el, g)
   stroke <- extract_stroke(shape_el, g)
   color  <- extract_text_color(shape_el, g)
+  txtdim <- extract_label_dim(g)             # list(w, h) of the foreignObject text area
 
   # Class name assigned in mermaid (e.g. ":::plan") — found in the g's classes
   # Mermaid adds class names after "default" and known shape-markers
@@ -198,17 +201,19 @@ parse_one_node <- function(g) {
   user_class   <- if (length(user_classes) > 0L) user_classes[1L] else NA_character_
 
   list(
-    id     = mmd_id,
-    label  = label,
-    shape  = geom$shape,
-    svg_cx = geom$svg_cx,
-    svg_cy = geom$svg_cy,
-    svg_w  = geom$svg_w,
-    svg_h  = geom$svg_h,
-    fill   = fill   %||% NA_character_,
-    stroke = stroke %||% NA_character_,
-    color  = color  %||% NA_character_,
-    class  = user_class
+    id      = mmd_id,
+    label   = label,
+    shape   = geom$shape,
+    svg_cx  = geom$svg_cx,
+    svg_cy  = geom$svg_cy,
+    svg_w   = geom$svg_w,
+    svg_h   = geom$svg_h,
+    txt_w   = txtdim$w,   # foreignObject width  (NA if not found)
+    txt_h   = txtdim$h,   # foreignObject height (NA if not found)
+    fill    = fill   %||% NA_character_,
+    stroke  = stroke %||% NA_character_,
+    color   = color  %||% NA_character_,
+    class   = user_class
   )
 }
 
@@ -431,8 +436,21 @@ empty_nodes_tbl <- function() {
     id = character(), label = character(), shape = character(),
     svg_cx = numeric(), svg_cy = numeric(),
     svg_w = numeric(), svg_h = numeric(),
+    txt_w = numeric(), txt_h = numeric(),
     fill = character(), stroke = character(), color = character(), class = character()
   )
+}
+
+# Returns the width and height of the <foreignObject> inside the node's label
+# group. These are the exact pixel dimensions mermaid used for the text content,
+# useful for sizing a DrawingML text overlay that avoids shape-geometry clipping.
+extract_label_dim <- function(g) {
+  fo <- xml2::xml_find_first(g, ".//foreignObject")
+  if (inherits(fo, "xml_missing"))
+    return(list(w = NA_real_, h = NA_real_))
+  w <- suppressWarnings(as.numeric(xml2::xml_attr(fo, "width")  %||% NA_character_))
+  h <- suppressWarnings(as.numeric(xml2::xml_attr(fo, "height") %||% NA_character_))
+  list(w = w, h = h)
 }
 
 # ── Subgraph extraction ────────────────────────────────────────────────────

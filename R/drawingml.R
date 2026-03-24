@@ -97,7 +97,12 @@ build_diagram_xml <- function(svg_data,
       xml <- node_shape_xml(nd, shape_id, vb, scale, off_x, off_y,
                             default_fill, default_stroke, default_text_color,
                             stroke_width_pt, font_size_hp)
-      if (nzchar(xml)) { parts <- c(parts, xml); shape_id <- shape_id + 1L }
+      if (nzchar(xml)) {
+        parts    <- c(parts, xml)
+        # diamond/hexagon nodes emit shape + separate text overlay = 2 anchors
+        n_ids    <- if (nd$shape %in% c("diamond", "hexagon")) 2L else 1L
+        shape_id <- shape_id + n_ids
+      }
     }
   }
 
@@ -168,29 +173,6 @@ make_anchor <- function(x_emu, y_emu, w_emu, h_emu,
     '</a:graphicData></a:graphic>',
     '</wp:anchor></w:drawing></w:r>'
   )
-}
-
-# ── Shape-specific text insets ────────────────────────────────────────────
-#
-# DrawingML preset geometries reduce the visible text area in ways that the
-# generic scale-derived margins don't account for:
-#
-#   diamond   — pointed top/bottom/left/right; inscribed rect ≈ 50% w × 50% h
-#   hexagon   — angled left/right ends; ≈ 13% of width lost per side
-#
-# For other shapes the standard scale-proportional margins are fine.
-
-.node_l_ins <- function(shape, w_emu, scale) {
-  base <- max(as.integer(91440 * scale / 9525), 9144L)
-  if      (shape == "diamond") max(as.integer(w_emu * 0.27), base)
-  else if (shape == "hexagon") max(as.integer(w_emu * 0.13), base)
-  else                         base
-}
-
-.node_t_ins <- function(shape, h_emu, scale) {
-  base <- max(as.integer(45720 * scale / 9525), 4572L)
-  if (shape == "diamond") max(as.integer(h_emu * 0.27), base)
-  else                    base
 }
 
 # ── Node shapes ────────────────────────────────────────────────────────────
@@ -264,10 +246,10 @@ node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
           "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
       "</w:p></w:txbxContent></wps:txbx>",
       "<wps:bodyPr anchor=\"ctr\" ",
-        "lIns=\"", .node_l_ins(shape_name, w_emu, scale), "\" ",
-        "rIns=\"", .node_l_ins(shape_name, w_emu, scale), "\" ",
-        "tIns=\"", .node_t_ins(shape_name, h_emu, scale), "\" ",
-        "bIns=\"", .node_t_ins(shape_name, h_emu, scale), "\">",
+        "lIns=\"", max(as.integer(91440 * scale / 9525), 9144L), "\" ",
+        "rIns=\"", max(as.integer(91440 * scale / 9525), 9144L), "\" ",
+        "tIns=\"", max(as.integer(45720 * scale / 9525), 4572L), "\" ",
+        "bIns=\"", max(as.integer(45720 * scale / 9525), 4572L), "\">",
         "<a:normAutofit/></wps:bodyPr>",
     "</wps:wsp>"
   )
@@ -277,6 +259,74 @@ node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
     id = nd$id %||% "", label = nd$label %||% "",
     shape = shape_name, class = nd$class %||% NULL
   ), auto_unbox = TRUE, null = "null")
+
+  # For shapes whose DrawingML preset geometry clips text to the shape outline
+  # (diamond, hexagon), render the visual shape without text and overlay a
+  # separate transparent rect text box.  Mermaid's foreignObject dimensions
+  # give the exact inner text area so the overlay is sized correctly.
+  clips_text <- shape_name %in% c("diamond", "hexagon")
+
+  if (clips_text) {
+    # Strip text body from the shape wsp
+    inner_shape <- paste0(
+      "<wps:wsp>",
+        "<wps:cNvSpPr><a:spLocks noChangeArrowheads=\"1\"/></wps:cNvSpPr>",
+        "<wps:spPr>",
+          "<a:xfrm><a:off x=\"0\" y=\"0\"/>",
+            "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/></a:xfrm>",
+          geom_xml, fill_xml, stroke_xml,
+        "</wps:spPr>",
+        "<wps:bodyPr><a:noAutofit/></wps:bodyPr>",
+      "</wps:wsp>"
+    )
+    shape_anchor <- make_anchor(x_emu, y_emu, w_emu, h_emu, shape_id,
+                                name       = paste0("mermaid:node:", nd$id %||% ""),
+                                descr_json = descr,
+                                z_order    = 251658240L,
+                                inner_xml  = inner_shape)
+
+    # Text overlay: transparent rect centred on the node, sized to the
+    # foreignObject dimensions (txt_w × txt_h), minimum shape bounding box.
+    raw_tw <- nd$txt_w %||% NA_real_
+    raw_th <- nd$txt_h %||% NA_real_
+    tw_emu <- if (!is.na(raw_tw) && raw_tw > 0) as.integer(round(raw_tw * scale))
+              else w_emu
+    th_emu <- if (!is.na(raw_th) && raw_th > 0) as.integer(round(raw_th * scale))
+              else h_emu
+    # Centre the text overlay on the node
+    tx_emu <- cx_emu - tw_emu %/% 2L
+    ty_emu <- cy_emu - th_emu %/% 2L
+
+    txt_inner <- paste0(
+      "<wps:wsp>",
+        "<wps:cNvSpPr><a:spLocks noChangeArrowheads=\"1\"/></wps:cNvSpPr>",
+        "<wps:spPr>",
+          "<a:xfrm><a:off x=\"0\" y=\"0\"/>",
+            "<a:ext cx=\"", tw_emu, "\" cy=\"", th_emu, "\"/></a:xfrm>",
+          "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>",
+          "<a:noFill/><a:ln w=\"0\"><a:noFill/></a:ln>",
+        "</wps:spPr>",
+        "<wps:txbx><w:txbxContent><w:p>",
+          "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
+          "<w:r><w:rPr>",
+            "<w:color w:val=\"", text_col, "\"/>",
+            "<w:sz w:val=\"", font_size_hp, "\"/>",
+            "<w:szCs w:val=\"", font_size_hp, "\"/>",
+          "</w:rPr>",
+            "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
+        "</w:p></w:txbxContent></wps:txbx>",
+        "<wps:bodyPr anchor=\"ctr\" lIns=\"0\" rIns=\"0\" tIns=\"0\" bIns=\"0\">",
+          "<a:normAutofit/></wps:bodyPr>",
+      "</wps:wsp>"
+    )
+    txt_descr <- paste0('{"v":"1","type":"node-label","id":"', nd$id %||% "", '"}')
+    txt_anchor <- make_anchor(tx_emu, ty_emu, tw_emu, th_emu, shape_id + 1L,
+                              name       = paste0("mermaid:label:", nd$id %||% ""),
+                              descr_json = txt_descr,
+                              z_order    = 251658241L,
+                              inner_xml  = txt_inner)
+    return(paste0(shape_anchor, txt_anchor))
+  }
 
   make_anchor(x_emu, y_emu, w_emu, h_emu, shape_id,
               name       = paste0("mermaid:node:", nd$id %||% ""),
