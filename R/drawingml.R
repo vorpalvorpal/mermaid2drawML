@@ -140,14 +140,15 @@ compute_scale <- function(svg_w, svg_h, page_w_in, page_h_in) {
 
 make_anchor <- function(x_emu, y_emu, w_emu, h_emu,
                          shape_id, name, descr_json,
-                         z_order = 251658240L, inner_xml) {
+                         z_order = 251658240L, behind_doc = FALSE, inner_xml) {
   w_emu <- max(as.integer(w_emu), 45720L)
   h_emu <- max(as.integer(h_emu), 45720L)
   paste0(
     '<w:r><w:rPr><w:noProof/></w:rPr><w:drawing>',
     '<wp:anchor distT="0" distB="0" distL="0" distR="0" ',
     'simplePos="0" relativeHeight="', z_order, '" ',
-    'behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">',
+    'behindDoc="', if (behind_doc) "1" else "0", '" ',
+    'locked="0" layoutInCell="1" allowOverlap="1">',
     '<wp:simplePos x="0" y="0"/>',
     '<wp:positionH relativeFrom="page">',
       '<wp:posOffset>', as.integer(x_emu), '</wp:posOffset></wp:positionH>',
@@ -324,11 +325,14 @@ subgraph_shape_xml <- function(sg, shape_id, vb, scale, off_x, off_y,
     class = sg$class %||% NULL
   ), auto_unbox = TRUE, null = "null")
 
-  # Low z-order so subgraphs render behind nodes and edges
+  # behindDoc=TRUE places subgraphs in the "behind text" layer, which is always
+  # visually behind the "in front of text" layer used by nodes and edges.
+  # This is more reliable than trying to win the relativeHeight z-order battle.
   make_anchor(x_emu, y_emu, w_emu, h_emu, shape_id,
               name       = paste0("mermaid:subgraph:", sg$id %||% ""),
               descr_json = descr,
-              z_order    = 1L,
+              z_order    = 251658240L,
+              behind_doc = TRUE,
               inner_xml  = inner)
 }
 
