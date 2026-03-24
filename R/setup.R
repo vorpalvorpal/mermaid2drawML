@@ -168,4 +168,4 @@ check_mermaid2drawml <- function() {
 }
 
 # ── Null-coalescing helper (base R) ────────────────────────────────────────
-`%||%` <- function(x, y) if (is.null(x)) y else x
+`%||%` <- function(x, y) if (is.null(x) || (length(x) == 1L && is.na(x))) y else x
