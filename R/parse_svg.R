@@ -28,12 +28,13 @@ parse_mermaid_svg <- function(svg, ast = NULL) {
   doc <- xml2::read_xml(svg)
   xml2::xml_ns_strip(doc)                  # drop SVG namespace for easier xpath
 
-  vb      <- parse_viewbox(doc)
-  style   <- extract_svg_style(doc)
-  nodes   <- extract_nodes(doc, ast)
-  edges   <- extract_edges(doc, nodes)
+  vb        <- parse_viewbox(doc)
+  style     <- extract_svg_style(doc)
+  nodes     <- extract_nodes(doc, ast)
+  subgraphs <- extract_subgraphs(doc, style)
+  edges     <- extract_edges(doc, nodes)
 
-  list(nodes = nodes, edges = edges, viewbox = vb, style = style)
+  list(nodes = nodes, subgraphs = subgraphs, edges = edges, viewbox = vb, style = style)
 }
 
 # ── viewBox ────────────────────────────────────────────────────────────────
@@ -97,7 +98,33 @@ extract_svg_style <- function(doc) {
     if (!is.na(sw) && sw > 0) edge_sw_px <- sw
   }
 
-  list(font_size_px = font_size_px, edge_stroke = edge_stroke, edge_sw_px = edge_sw_px)
+  # Cluster default fill / stroke -----------------------------------------
+  # Mermaid emits:  .cluster rect { fill: #ffffde; stroke: #aaaa33; ... }
+  cluster_fill   <- "FFFFDE"
+  cluster_stroke <- "AAAA33"
+  m <- regmatches(style_text,
+    regexpr("\\.cluster rect\\s*\\{([^}]*?)\\}", style_text, perl = TRUE))
+  if (length(m) > 0L) {
+    blk <- m[[1]]
+    mf <- regmatches(blk,
+      regexpr("fill:\\s*#([0-9A-Fa-f]{6})", blk, perl = TRUE))
+    if (length(mf) > 0L) {
+      col <- regmatches(mf[[1]], regexpr("[0-9A-Fa-f]{6}$", mf[[1]], perl = TRUE))
+      if (length(col) > 0L) cluster_fill <- toupper(col)
+    }
+    ms <- regmatches(blk,
+      regexpr("stroke:\\s*#([0-9A-Fa-f]{6})", blk, perl = TRUE))
+    if (length(ms) > 0L) {
+      col <- regmatches(ms[[1]], regexpr("[0-9A-Fa-f]{6}$", ms[[1]], perl = TRUE))
+      if (length(col) > 0L) cluster_stroke <- toupper(col)
+    }
+  }
+
+  list(font_size_px    = font_size_px,
+       edge_stroke     = edge_stroke,
+       edge_sw_px      = edge_sw_px,
+       cluster_fill    = cluster_fill,
+       cluster_stroke  = cluster_stroke)
 }
 
 # ── Node extraction ────────────────────────────────────────────────────────
@@ -205,9 +232,17 @@ parse_translate <- function(tf) {
 }
 
 find_shape_element <- function(g) {
-  # Priority: rect > polygon > ellipse > circle > path
+  # Mermaid marks the actual node shape with class="label-container" (or
+  # "basic label-container"). Using this avoids accidentally picking up the
+  # empty <rect/> placeholder that mermaid inserts inside <g class="label">,
+  # which has no geometry attributes and would produce zero-size shapes.
+  el <- xml2::xml_find_first(g, ".//*[contains(@class,'label-container')]")
+  if (!inherits(el, "xml_missing")) return(el)
+
+  # Fallback: search for geometry elements that are NOT inside the label group
   for (tag in c("rect", "polygon", "ellipse", "circle", "path")) {
-    el <- xml2::xml_find_first(g, paste0(".//", tag))
+    el <- xml2::xml_find_first(
+      g, paste0(".//", tag, "[not(ancestor::*[contains(@class,'label')])]"))
     if (!inherits(el, "xml_missing")) return(el)
   }
   NULL
@@ -393,6 +428,87 @@ empty_nodes_tbl <- function() {
     svg_cx = numeric(), svg_cy = numeric(),
     svg_w = numeric(), svg_h = numeric(),
     fill = character(), stroke = character(), color = character(), class = character()
+  )
+}
+
+# ── Subgraph extraction ────────────────────────────────────────────────────
+
+# Mermaid renders subgraphs as <g class="cluster [userClass]" id="SubgraphID">.
+# The rect child gives the absolute SVG position (no transform on the <g>).
+# "subSpace" clusters are invisible layout-spacers and are filtered out.
+
+extract_subgraphs <- function(doc, style) {
+  default_fill   <- style$cluster_fill   %||% "FFFFDE"
+  default_stroke <- style$cluster_stroke %||% "AAAA33"
+
+  gs <- xml2::xml_find_all(doc, ".//g[contains(@class,'cluster')][@id]")
+  gs <- Filter(function(g) {
+    cl <- xml2::xml_attr(g, "class") %||% ""
+    grepl("\\bcluster\\b", cl) && !grepl("\\bcluster-label\\b", cl)
+  }, gs)
+
+  rows <- lapply(gs, function(g) {
+    svg_id  <- xml2::xml_attr(g, "id") %||% ""
+    if (!nzchar(svg_id)) return(NULL)
+
+    classes <- strsplit(xml2::xml_attr(g, "class") %||% "", "\\s+")[[1]]
+    if ("subSpace" %in% classes) return(NULL)  # invisible spacer
+
+    rect_el <- xml2::xml_find_first(g, "./rect")
+    if (inherits(rect_el, "xml_missing")) return(NULL)
+
+    x <- as.numeric(xml2::xml_attr(rect_el, "x")     %||% "0")
+    y <- as.numeric(xml2::xml_attr(rect_el, "y")     %||% "0")
+    w <- as.numeric(xml2::xml_attr(rect_el, "width") %||% "0")
+    h <- as.numeric(xml2::xml_attr(rect_el, "height")%||% "0")
+    if (w <= 0 || h <= 0) return(NULL)
+
+    fill   <- extract_fill(rect_el, g)
+    stroke <- extract_stroke(rect_el, g)
+
+    # Label text from cluster-label child
+    label_g <- xml2::xml_find_first(g, ".//*[contains(@class,'cluster-label')]")
+    label   <- if (!inherits(label_g, "xml_missing")) trimws(xml2::xml_text(label_g)) else ""
+
+    known       <- c("cluster", "subSpace")
+    user_class  <- setdiff(classes, known)
+    user_class  <- if (length(user_class) > 0L) user_class[1L] else NA_character_
+
+    list(
+      id     = svg_id,
+      label  = label,
+      svg_x  = x,
+      svg_y  = y,
+      svg_w  = w,
+      svg_h  = h,
+      fill   = fill   %||% default_fill,
+      stroke = stroke %||% default_stroke,
+      class  = user_class
+    )
+  })
+
+  rows <- Filter(Negate(is.null), rows)
+  if (length(rows) == 0L) return(empty_subgraphs_tbl())
+
+  tibble::tibble(
+    id     = vapply(rows, `[[`, character(1), "id"),
+    label  = vapply(rows, `[[`, character(1), "label"),
+    svg_x  = vapply(rows, `[[`, numeric(1),   "svg_x"),
+    svg_y  = vapply(rows, `[[`, numeric(1),   "svg_y"),
+    svg_w  = vapply(rows, `[[`, numeric(1),   "svg_w"),
+    svg_h  = vapply(rows, `[[`, numeric(1),   "svg_h"),
+    fill   = vapply(rows, `[[`, character(1), "fill"),
+    stroke = vapply(rows, `[[`, character(1), "stroke"),
+    class  = vapply(rows, `[[`, character(1), "class")
+  )
+}
+
+empty_subgraphs_tbl <- function() {
+  tibble::tibble(
+    id = character(), label = character(),
+    svg_x = numeric(), svg_y = numeric(),
+    svg_w = numeric(), svg_h = numeric(),
+    fill = character(), stroke = character(), class = character()
   )
 }
 

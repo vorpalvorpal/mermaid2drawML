@@ -76,8 +76,20 @@ build_diagram_xml <- function(svg_data,
   edge_stroke  <- sty$edge_stroke %||% default_stroke
   edge_sw_emu  <- max(as.integer(round(sty$edge_sw_px * scale)), 3175L)
 
+  subgraphs <- svg_data$subgraphs %||% empty_subgraphs_tbl()
+
   shape_id <- as.integer(start_id)
   parts    <- character(0)
+
+  # Subgraphs first — lowest z-order so they render behind everything else
+  if (nrow(subgraphs) > 0L) {
+    for (i in seq_len(nrow(subgraphs))) {
+      sg  <- as.list(subgraphs[i, ])
+      xml <- subgraph_shape_xml(sg, shape_id, vb, scale, off_x, off_y,
+                                stroke_width_pt, font_size_hp, default_text_color)
+      if (nzchar(xml)) { parts <- c(parts, xml); shape_id <- shape_id + 1L }
+    }
+  }
 
   if (nrow(nodes) > 0L) {
     for (i in seq_len(nrow(nodes))) {
@@ -200,9 +212,15 @@ node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
   geom_xml <- paste0("<a:prstGeom prst=\"", prst, "\"><a:avLst/></a:prstGeom>")
 
   label    <- xml_escape(strip_html(nd$label %||% nd$id %||% ""))
-  text_col <- nd$color %||%
-    if (!is_transparent && !is.na(fill_hex) && is_dark(fill_hex)) "FFFFFF"
-    else default_text_color
+  # nd$color may be NA_character_ (not NULL) when no classDef colour was found;
+  # %||% only catches NULL, so check explicitly.
+  text_col <- if (!is.na(nd$color %||% NA_character_)) {
+    nd$color
+  } else if (!is_transparent && !is.na(fill_hex) && is_dark(fill_hex)) {
+    "FFFFFF"
+  } else {
+    default_text_color
+  }
 
   inner <- paste0(
     "<wps:wsp>",
@@ -240,6 +258,77 @@ node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
               name       = paste0("mermaid:node:", nd$id %||% ""),
               descr_json = descr,
               z_order    = 251658240L,
+              inner_xml  = inner)
+}
+
+# ── Subgraph (cluster) shapes ─────────────────────────────────────────────
+
+subgraph_shape_xml <- function(sg, shape_id, vb, scale, off_x, off_y,
+                                stroke_width_pt, font_size_hp,
+                                default_text_color) {
+  # Cluster rects use absolute SVG coordinates (no translate on the <g>)
+  x_emu <- as.integer(round((sg$svg_x - vb[1]) * scale)) + off_x
+  y_emu <- as.integer(round((sg$svg_y - vb[2]) * scale)) + off_y
+  w_emu <- max(as.integer(round(sg$svg_w * scale)), 91440L)
+  h_emu <- max(as.integer(round(sg$svg_h * scale)), 45720L)
+
+  fill_hex <- sg$fill %||% NA_character_
+  fill_xml <- if (is.na(fill_hex)) {
+    "<a:noFill/>"
+  } else {
+    paste0("<a:solidFill><a:srgbClr val=\"", fill_hex, "\"/></a:solidFill>")
+  }
+
+  stroke_hex <- sg$stroke %||% "AAAA33"
+  sw_emu     <- max(as.integer(stroke_width_pt * 12700 * scale / 9525), 1588L)
+  stroke_xml <- paste0(
+    "<a:ln w=\"", sw_emu, "\">",
+    "<a:solidFill><a:srgbClr val=\"", stroke_hex, "\"/></a:solidFill>",
+    "</a:ln>"
+  )
+
+  label    <- xml_escape(strip_html(sg$label %||% ""))
+  text_col <- if (!is.na(fill_hex) && is_dark(fill_hex)) "FFFFFF" else default_text_color
+
+  l_ins <- max(as.integer(91440 * scale / 9525), 9144L)
+  t_ins <- max(as.integer(45720 * scale / 9525), 4572L)
+
+  inner <- paste0(
+    "<wps:wsp>",
+      "<wps:cNvSpPr><a:spLocks noChangeArrowheads=\"1\"/></wps:cNvSpPr>",
+      "<wps:spPr>",
+        "<a:xfrm><a:off x=\"0\" y=\"0\"/>",
+          "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/></a:xfrm>",
+        "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>",
+        fill_xml, stroke_xml,
+      "</wps:spPr>",
+      "<wps:txbx><w:txbxContent><w:p>",
+        "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
+        "<w:r><w:rPr>",
+          "<w:color w:val=\"", text_col, "\"/>",
+          "<w:sz w:val=\"", font_size_hp, "\"/>",
+          "<w:szCs w:val=\"", font_size_hp, "\"/>",
+        "</w:rPr>",
+          "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
+      "</w:p></w:txbxContent></wps:txbx>",
+      "<wps:bodyPr anchor=\"t\" ",
+        "lIns=\"", l_ins, "\" rIns=\"", l_ins, "\" ",
+        "tIns=\"", t_ins, "\" bIns=\"", t_ins, "\">",
+        "<a:normAutofit/></wps:bodyPr>",
+    "</wps:wsp>"
+  )
+
+  descr <- jsonlite::toJSON(list(
+    v = "1", type = "subgraph",
+    id = sg$id %||% "", label = sg$label %||% "",
+    class = sg$class %||% NULL
+  ), auto_unbox = TRUE, null = "null")
+
+  # Low z-order so subgraphs render behind nodes and edges
+  make_anchor(x_emu, y_emu, w_emu, h_emu, shape_id,
+              name       = paste0("mermaid:subgraph:", sg$id %||% ""),
+              descr_json = descr,
+              z_order    = 1L,
               inner_xml  = inner)
 }
 
