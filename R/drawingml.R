@@ -170,6 +170,29 @@ make_anchor <- function(x_emu, y_emu, w_emu, h_emu,
   )
 }
 
+# ── Shape-specific text insets ────────────────────────────────────────────
+#
+# DrawingML preset geometries reduce the visible text area in ways that the
+# generic scale-derived margins don't account for:
+#
+#   diamond   — pointed top/bottom/left/right; inscribed rect ≈ 50% w × 50% h
+#   hexagon   — angled left/right ends; ≈ 13% of width lost per side
+#
+# For other shapes the standard scale-proportional margins are fine.
+
+.node_l_ins <- function(shape, w_emu, scale) {
+  base <- max(as.integer(91440 * scale / 9525), 9144L)
+  if      (shape == "diamond") max(as.integer(w_emu * 0.27), base)
+  else if (shape == "hexagon") max(as.integer(w_emu * 0.13), base)
+  else                         base
+}
+
+.node_t_ins <- function(shape, h_emu, scale) {
+  base <- max(as.integer(45720 * scale / 9525), 4572L)
+  if (shape == "diamond") max(as.integer(h_emu * 0.27), base)
+  else                    base
+}
+
 # ── Node shapes ────────────────────────────────────────────────────────────
 
 node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
@@ -241,10 +264,10 @@ node_shape_xml <- function(nd, shape_id, vb, scale, off_x, off_y,
           "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
       "</w:p></w:txbxContent></wps:txbx>",
       "<wps:bodyPr anchor=\"ctr\" ",
-        "lIns=\"", max(as.integer(91440 * scale / 9525), 9144L), "\" ",
-        "rIns=\"", max(as.integer(91440 * scale / 9525), 9144L), "\" ",
-        "tIns=\"", max(as.integer(45720 * scale / 9525), 4572L), "\" ",
-        "bIns=\"", max(as.integer(45720 * scale / 9525), 4572L), "\">",
+        "lIns=\"", .node_l_ins(shape_name, w_emu, scale), "\" ",
+        "rIns=\"", .node_l_ins(shape_name, w_emu, scale), "\" ",
+        "tIns=\"", .node_t_ins(shape_name, h_emu, scale), "\" ",
+        "bIns=\"", .node_t_ins(shape_name, h_emu, scale), "\">",
         "<a:normAutofit/></wps:bodyPr>",
     "</wps:wsp>"
   )
