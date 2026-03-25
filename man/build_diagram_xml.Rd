@@ -12,7 +12,7 @@ build_diagram_xml(
   page_height_in = 8,
   margin_in = 1,
   default_fill = "FFFFFF",
-  default_stroke = "4472C4",
+  default_stroke = "5E504E",
   default_text_color = "000000",
   stroke_width_pt = 1.5
 )
@@ -20,10 +20,7 @@ build_diagram_xml(
 \arguments{
 \item{svg_data}{List from \code{\link[=parse_mermaid_svg]{parse_mermaid_svg()}}: nodes, edges, viewbox.}
 
-\item{ast}{List. Reserved for future use. The AST from \verb{@mermaid-js/parser}
-is accepted here for forward-compatibility but is not currently consulted.
-All shape data is derived from \code{svg_data}. See \code{enrich_from_ast()} in
-\code{parse_svg.R} for the intended use and current status.}
+\item{ast}{Reserved for future use.}
 
 \item{start_id}{Integer. First shape ID; increment between diagrams.}
 
@@ -35,7 +32,7 @@ All shape data is derived from \code{svg_data}. See \code{enrich_from_ast()} in
 
 \item{default_fill}{Default node fill colour (6-char hex). Default "FFFFFF".}
 
-\item{default_stroke}{Default stroke colour. Default "4472C4".}
+\item{default_stroke}{Default stroke colour. Default "5E504E".}
 
 \item{default_text_color}{Default text colour. Default "000000".}
 
