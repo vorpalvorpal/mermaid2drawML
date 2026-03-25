@@ -235,9 +235,15 @@ make_super_anchor <- function(x_page, y_page, w_emu, h_emu, shape_id,
                                children_xml) {
   w_emu <- max(as.integer(w_emu), 91440L)
   h_emu <- max(as.integer(h_emu), 91440L)
+  # mc:AlternateContent with mc:Choice Requires="wpg" is required for Word to
+  # activate its wpg namespace handler. Without this wrapper, nested wpg:grpSp
+  # groups do not render even when the XML is otherwise spec-conformant.
   paste0(
-    '<w:r><w:rPr><w:noProof/></w:rPr><w:drawing>',
-    '<wp:anchor distT="0" distB="0" distL="0" distR="0" ',
+    '<w:r><w:rPr><w:noProof/></w:rPr>',
+    '<mc:AlternateContent>',
+    '<mc:Choice Requires="wpg">',
+    '<w:drawing>',
+    '<wp:anchor distT="0" distB="0" distL="114300" distR="114300" ',
       'simplePos="0" relativeHeight="251658240" behindDoc="0" ',
       'locked="0" layoutInCell="1" allowOverlap="1">',
     '<wp:simplePos x="0" y="0"/>',
@@ -254,7 +260,11 @@ make_super_anchor <- function(x_page, y_page, w_emu, h_emu, shape_id,
     '<a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup">',
     make_root_wgp(w_emu, h_emu, children_xml),
     '</a:graphicData></a:graphic>',
-    '</wp:anchor></w:drawing></w:r>'
+    '</wp:anchor></w:drawing>',
+    '</mc:Choice>',
+    '<mc:Fallback/>',
+    '</mc:AlternateContent>',
+    '</w:r>'
   )
 }
 
