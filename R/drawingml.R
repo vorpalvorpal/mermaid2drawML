@@ -338,30 +338,17 @@ node_text_colour <- function(nd, is_transparent, fill_hex, default_tc) {
   default_tc
 }
 
-# ── Per-shape non-visual properties (carries round-trip metadata) ──────────
+# ── Per-shape non-visual properties ────────────────────────────────────────
+# wps:wsp only allows <wps:cNvSpPr> (shapes) or <wps:cNvCnPr/> (connectors)
+# directly as its first child — there is no wps:nvSpPr or wps:nvCnPr wrapper.
+# Round-trip metadata lives only on the outer wp:anchor's wp:docPr descr.
 
-# Build a <wps:nvSpPr> element embedding JSON metadata as the `descr`
-# attribute on wps:cNvPr.  The JSON is XML-escaped by xml_escape().
 make_nvSpPr <- function(shape_id, name, descr_json) {
-  paste0(
-    '<wps:nvSpPr>',
-      '<wps:cNvPr id="', shape_id,
-        '" name="', xml_escape(name),
-        '" descr="', xml_escape(descr_json), '"/>',
-      '<wps:cNvSpPr><a:spLocks noChangeArrowheads="1"/></wps:cNvSpPr>',
-    '</wps:nvSpPr>'
-  )
+  '<wps:cNvSpPr><a:spLocks noChangeArrowheads="1"/></wps:cNvSpPr>'
 }
 
 make_nvCnPr <- function(shape_id, name, descr_json) {
-  paste0(
-    '<wps:nvCnPr>',
-      '<wps:cNvPr id="', shape_id,
-        '" name="', xml_escape(name),
-        '" descr="', xml_escape(descr_json), '"/>',
-      '<wps:cNvCnPr/>',
-    '</wps:nvCnPr>'
-  )
+  '<wps:cNvCnPr/>'
 }
 
 # ── Node emission ──────────────────────────────────────────────────────────
