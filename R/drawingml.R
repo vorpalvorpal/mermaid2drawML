@@ -36,7 +36,7 @@
   parallelogram = "parallelogram",
   cylinder      = "can",
   doc           = "foldedCorner",
-  docs          = "rect",          # no DrawingML equivalent; use plain rect
+  docs          = "foldedCorner",  # stacked-pages shape; foldedCorner is closest preset
   text          = "rect"
 )
 
@@ -91,9 +91,10 @@ build_diagram_xml <- function(svg_data,
   # Scale font size proportionally; floor at 8 half-pts (4pt).
   font_size_hp <- max(as.integer(round(sty$font_size_px * scale / 6350)), 8L)
 
-  # Edge stroke: colour from SVG stylesheet; width scaled from SVG px, min 0.25pt.
+  # Edge stroke: colour from SVG stylesheet; width scaled from SVG px, min 0.75pt.
+  # Word renders sub-0.5pt lines as hairlines; 0.75pt keeps edges clearly visible.
   edge_stroke <- sty$edge_stroke %||% default_stroke
-  edge_sw_emu <- max(as.integer(round(sty$edge_sw_px * scale)), 3175L)
+  edge_sw_emu <- max(as.integer(round(sty$edge_sw_px * scale)), 9525L)
 
   subgraphs <- svg_data$subgraphs %||% empty_subgraphs_tbl()
 
@@ -456,11 +457,12 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
   }
 
   stroke_hex <- sg$stroke %||% "AAAA33"
-  # Use per-subgraph stroke-width from SVG (stroke-width:Npx in inline style)
-  # if available; otherwise fall back to the global default.
-  sg_sw_pt   <- sg$stroke_width %||% NA_real_
-  if (!is.na(sg_sw_pt) && sg_sw_pt > 0) {
-    sw_emu <- max(as.integer(round(sg_sw_pt * 12700)), 1588L)
+  # stroke-width:Npx from SVG is in SVG-user-unit pixels; scale to EMU the same
+  # way as every other dimension. Without scaling, 4px would become 4pt (≈50800 EMU)
+  # which is far too thick. With scaling it becomes ~1pt.
+  sg_sw_px <- sg$stroke_width %||% NA_real_
+  if (!is.na(sg_sw_px) && sg_sw_px > 0) {
+    sw_emu <- max(as.integer(round(sg_sw_px * ctx$scale)), 1588L)
   } else {
     sw_emu <- max(as.integer(ctx$sw_pt * 12700 * ctx$scale / 9525), 1588L)
   }
