@@ -117,60 +117,56 @@ build_diagram_xml <- function(svg_data,
   node_sg_vec <- assign_nodes_to_subgraphs(nodes, sg_tree)
   if (nrow(nodes) > 0L) names(node_sg_vec) <- nodes$id
 
-  parts <- character(0)
+  # ── Main group (nodes + subgraph structure, NO edges) ──────────────────
+  # Matches the structure of Word's own grouped drawings: the group contains
+  # only subgraph grpSp elements (+ any top-level nodes). Edges are emitted
+  # as separate wp:anchor elements so they don't block group selection.
 
-  # Root subgraphs — emitted first so they are drawn behind nodes/edges
+  group_parts <- character(0)
+
   root_sg_ids <- names(sg_tree)[vapply(sg_tree, function(sg)
     is.na(sg$parent_id %||% NA_character_), logical(1))]
 
   for (sg_id in root_sg_ids) {
     xml <- emit_subgraph_grpSp(sg_id, sg_tree, vb[1], vb[2],
-                                nodes, edges, node_sg_vec, ctx, ctr)
-    if (nzchar(xml)) parts <- c(parts, xml)
+                                nodes, node_sg_vec, ctx, ctr)
+    if (nzchar(xml)) group_parts <- c(group_parts, xml)
   }
 
-  # Nodes not inside any subgraph
+  # Top-level nodes (not inside any subgraph)
   if (nrow(nodes) > 0L) {
     top_level_idx <- which(is.na(node_sg_vec))
     for (i in top_level_idx) {
       nd  <- as.list(nodes[i, ])
       xml <- emit_node(nd, vb[1], vb[2], ctx, ctr)
-      if (nzchar(xml)) parts <- c(parts, xml)
+      if (nzchar(xml)) group_parts <- c(group_parts, xml)
     }
   }
 
-  # Top-level edges: those not fully contained within a single root subgraph
+  children_xml <- paste0(group_parts, collapse = "")
+  anchor_xml   <- make_super_anchor(off_x, off_y, sg_w_emu, sg_h_emu,
+                                     as.integer(start_id), children_xml)
+
+  # ── Edge anchors (separate from the group) ─────────────────────────────
+  edge_parts <- character(0)
   if (nrow(edges) > 0L) {
     for (i in seq_len(nrow(edges))) {
-      e       <- as.list(edges[i, ])
-      from_id <- e$from %||% NA_character_
-      to_id   <- e$to   %||% NA_character_
-      from_sg <- if (!is.na(from_id) && from_id %in% names(node_sg_vec))
-                   node_sg_vec[[from_id]] else NA_character_
-      to_sg   <- if (!is.na(to_id) && to_id %in% names(node_sg_vec))
-                   node_sg_vec[[to_id]]   else NA_character_
-
-      is_top_level <- is.na(from_sg) || is.na(to_sg) || !same_root(from_sg, to_sg, sg_tree)
-      if (!is_top_level) next
-
-      xml <- emit_edge(e, vb[1], vb[2], ctx, ctr)
-      if (nzchar(xml)) parts <- c(parts, xml)
+      e   <- as.list(edges[i, ])
+      xml <- emit_edge_anchor(e, off_x, off_y, vb, ctx, ctr)
+      if (nzchar(xml)) edge_parts <- c(edge_parts, xml)
 
       lbl <- e$label %||% ""
       if (nzchar(lbl) &&
           !is.na(e$label_x %||% NA_real_) &&
           !is.na(e$label_y %||% NA_real_)) {
-        lxml <- emit_edge_label(e, vb[1], vb[2], ctx, ctr)
-        if (nzchar(lxml)) parts <- c(parts, lxml)
+        lxml <- emit_edge_label_anchor(e, off_x, off_y, vb, ctx, ctr)
+        if (nzchar(lxml)) edge_parts <- c(edge_parts, lxml)
       }
     }
   }
 
-  children_xml <- paste0(parts, collapse = "")
-  anchor_xml   <- make_super_anchor(off_x, off_y, sg_w_emu, sg_h_emu,
-                                     as.integer(start_id), children_xml)
-
-  xml <- paste0('<w:p ', .dml_namespaces, '>', anchor_xml, '</w:p>')
+  all_xml <- paste0(c(anchor_xml, edge_parts), collapse = "")
+  xml <- paste0('<w:p ', .dml_namespaces, '>', all_xml, '</w:p>')
   list(xml = xml, next_id = ctr$peek())
 }
 
@@ -230,6 +226,33 @@ make_nested_grpSp <- function(grp_id, name, x_rel, y_rel, w_emu, h_emu,
 }
 
 # ── Super-group anchor ──────────────────────────────────────────────────────
+
+# Standalone shape anchor (for edges emitted outside the main group).
+make_shape_anchor <- function(x_page, y_page, w_emu, h_emu, shape_id, wsp_xml) {
+  w_emu <- max(as.integer(w_emu), 91440L)
+  h_emu <- max(as.integer(h_emu), 91440L)
+  paste0(
+    '<w:r><w:rPr><w:noProof/></w:rPr><w:drawing>',
+    '<wp:anchor distT="0" distB="0" distL="0" distR="0" ',
+      'simplePos="0" relativeHeight="251658240" behindDoc="0" ',
+      'locked="0" layoutInCell="1" allowOverlap="1">',
+    '<wp:simplePos x="0" y="0"/>',
+    '<wp:positionH relativeFrom="page"><wp:posOffset>',
+      as.integer(x_page), '</wp:posOffset></wp:positionH>',
+    '<wp:positionV relativeFrom="page"><wp:posOffset>',
+      as.integer(y_page), '</wp:posOffset></wp:positionV>',
+    '<wp:extent cx="', w_emu, '" cy="', h_emu, '"/>',
+    '<wp:effectExtent l="0" t="0" r="0" b="0"/>',
+    '<wp:wrapNone/>',
+    '<wp:docPr id="', shape_id, '" name="edge', shape_id, '"/>',
+    '<wp:cNvGraphicFramePr/>',
+    '<a:graphic>',
+    '<a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">',
+    wsp_xml,
+    '</a:graphicData></a:graphic>',
+    '</wp:anchor></w:drawing></w:r>'
+  )
+}
 
 make_super_anchor <- function(x_page, y_page, w_emu, h_emu, shape_id,
                                children_xml) {
@@ -380,7 +403,7 @@ make_nvCnPr <- function(shape_id, name, descr_json) {
 # ── Subgraph group emission ─────────────────────────────────────────────────
 
 emit_subgraph_grpSp <- function(sg_id, sg_tree, origin_x_px, origin_y_px,
-                                 nodes, edges, node_sg_vec, ctx, ctr) {
+                                 nodes, node_sg_vec, ctx, ctr) {
   sg    <- sg_tree[[sg_id]]
   scale <- ctx$scale
   x_rel <- as.integer(round((sg$svg_x - origin_x_px) * scale))
@@ -388,13 +411,13 @@ emit_subgraph_grpSp <- function(sg_id, sg_tree, origin_x_px, origin_y_px,
   w_emu <- max(as.integer(round(sg$svg_w * scale)), 91440L)
   h_emu <- max(as.integer(round(sg$svg_h * scale)), 91440L)
 
-  grp_id  <- ctr$next_id()
-  bg_xml  <- subgraph_rect_wsp(sg, w_emu, h_emu, ctx, ctr)
+  grp_id <- ctr$next_id()
+  bg_xml <- subgraph_rect_wsp(sg, w_emu, h_emu, ctx, ctr)
 
   # Child subgraph groups (positions relative to this subgraph origin)
   child_sg_xml <- vapply(sg$children, function(child_id)
     emit_subgraph_grpSp(child_id, sg_tree, sg$svg_x, sg$svg_y,
-                        nodes, edges, node_sg_vec, ctx, ctr),
+                        nodes, node_sg_vec, ctx, ctr),
     character(1))
 
   # Nodes directly in this subgraph (not in any child subgraph)
@@ -403,39 +426,9 @@ emit_subgraph_grpSp <- function(sg_id, sg_tree, origin_x_px, origin_y_px,
     emit_node(as.list(nodes[i, ]), sg$svg_x, sg$svg_y, ctx, ctr),
     character(1))
 
-  # Edges whose both endpoints are in this subgraph subtree but not both
-  # within the same single child subgraph
-  edge_xml  <- character(nrow(edges))
-  label_xml <- character(nrow(edges))
-  for (i in seq_len(nrow(edges))) {
-    e       <- as.list(edges[i, ])
-    from_id <- e$from %||% NA_character_
-    to_id   <- e$to   %||% NA_character_
-    from_sg <- if (!is.na(from_id) && from_id %in% names(node_sg_vec))
-                 node_sg_vec[[from_id]] else NA_character_
-    to_sg   <- if (!is.na(to_id) && to_id %in% names(node_sg_vec))
-                 node_sg_vec[[to_id]]   else NA_character_
-
-    from_in <- !is.na(from_sg) && is_in_subtree(from_sg, sg_id, sg_tree)
-    to_in   <- !is.na(to_sg)   && is_in_subtree(to_sg,   sg_id, sg_tree)
-    if (!from_in || !to_in) next
-
-    skip <- FALSE
-    for (child_id in sg$children) {
-      if (is_in_subtree(from_sg, child_id, sg_tree) &&
-          is_in_subtree(to_sg,   child_id, sg_tree)) {
-        skip <- TRUE; break
-      }
-    }
-    if (skip) next
-
-    edge_xml[i] <- emit_edge(e, sg$svg_x, sg$svg_y, ctx, ctr)
-    lbl <- e$label %||% ""
-    if (nzchar(lbl) && !is.na(e$label_x %||% NA_real_) && !is.na(e$label_y %||% NA_real_))
-      label_xml[i] <- emit_edge_label(e, sg$svg_x, sg$svg_y, ctx, ctr)
-  }
-
-  all_pieces <- c(bg_xml, child_sg_xml, node_xml, edge_xml, label_xml)
+  # Edges are NOT emitted inside the group — they are separate anchors so
+  # that the subgraph grpSp elements remain selectable as groups in Word.
+  all_pieces <- c(bg_xml, child_sg_xml, node_xml)
   all_xml    <- paste0(all_pieces[nzchar(all_pieces)], collapse = "")
 
   make_nested_grpSp(grp_id,
@@ -710,6 +703,106 @@ node_text_overlay_wsp <- function(nd, tx_rel, ty_rel, tw_emu, th_emu, ctx, ctr) 
 }
 
 # ── Edge emission ──────────────────────────────────────────────────────────
+#
+# emit_edge_anchor / emit_edge_label_anchor: produce standalone wp:anchor
+# elements using absolute page coordinates (off_x + SVG position).
+# These are called from build_diagram_xml to place edges outside the main group.
+
+emit_edge_anchor <- function(e, off_x, off_y, vb, ctx, ctr) {
+  path_d <- e$path_d %||% ""
+  if (!nzchar(path_d)) return("")
+
+  cg <- svg_path_to_custgeom(path_d, ctx$scale)
+  if (is.null(cg)) return("")
+
+  shape_id <- ctr$next_id()
+  x_abs    <- off_x + cg$x_emu - as.integer(round(vb[1] * ctx$scale))
+  y_abs    <- off_y + cg$y_emu - as.integer(round(vb[2] * ctx$scale))
+  w_emu    <- cg$w_emu
+  h_emu    <- cg$h_emu
+
+  lt       <- e$line_type %||% "solid"
+  sw_emu   <- if (identical(lt, "thick")) as.integer(ctx$edge_sw_emu * 2L) else ctx$edge_sw_emu
+  dash_xml <- if (identical(lt, "dashed")) "<a:prstDash val=\"dash\"/>" else ""
+
+  make_end <- function(type, which) {
+    type <- type %||% "none"
+    if (type == "arrow")  return(paste0("<a:", which, "End type=\"arrow\" w=\"sm\" len=\"sm\"/>"))
+    if (type == "circle") return(paste0("<a:", which, "End type=\"oval\" w=\"sm\" len=\"sm\"/>"))
+    if (type == "cross")  return(paste0("<a:", which, "End type=\"diamond\" w=\"sm\" len=\"sm\"/>"))
+    paste0("<a:", which, "End type=\"none\"/>")
+  }
+
+  nv_xml <- make_nvCnPr(shape_id,
+                         paste0("mermaid:edge:",
+                                e$from %||% "?", "\u2192", e$to %||% "?"),
+                         "{}")
+
+  wsp_xml <- paste0(
+    "<wps:wsp>",
+      nv_xml,
+      "<wps:spPr>",
+        "<a:xfrm>",
+          "<a:off x=\"0\" y=\"0\"/>",
+          "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/>",
+        "</a:xfrm>",
+        cg$xml,
+        "<a:noFill/>",
+        "<a:ln w=\"", sw_emu, "\">",
+          "<a:solidFill><a:srgbClr val=\"", ctx$edge_stroke, "\"/></a:solidFill>",
+          dash_xml,
+          make_end(e$arrow_start, "head"),
+          make_end(e$arrow_end,   "tail"),
+        "</a:ln>",
+      "</wps:spPr>",
+      "<wps:bodyPr/>",
+    "</wps:wsp>"
+  )
+
+  make_shape_anchor(x_abs, y_abs, w_emu, h_emu, shape_id, wsp_xml)
+}
+
+emit_edge_label_anchor <- function(e, off_x, off_y, vb, ctx, ctr) {
+  lx <- as.numeric(e$label_x %||% NA_real_)
+  ly <- as.numeric(e$label_y %||% NA_real_)
+  if (is.na(lx) || is.na(ly)) return("")
+
+  shape_id <- ctr$next_id()
+  lbl      <- xml_escape(strip_html(e$label %||% ""))
+  w_emu    <- inches_to_emu(1.2)
+  h_emu    <- inches_to_emu(0.3)
+  x_abs    <- off_x + as.integer(round((lx - vb[1]) * ctx$scale)) - w_emu %/% 2L
+  y_abs    <- off_y + as.integer(round((ly - vb[2]) * ctx$scale)) - h_emu %/% 2L
+
+  nv_xml <- make_nvSpPr(shape_id,
+                         paste0("mermaid:edge_label:", e$from %||% "", ":", e$to %||% ""),
+                         "{}")
+
+  wsp_xml <- paste0(
+    "<wps:wsp>",
+      nv_xml,
+      "<wps:spPr>",
+        "<a:xfrm>",
+          "<a:off x=\"0\" y=\"0\"/>",
+          "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/>",
+        "</a:xfrm>",
+        "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>",
+        "<a:noFill/><a:ln w=\"0\"><a:noFill/></a:ln>",
+      "</wps:spPr>",
+      "<wps:txbx><w:txbxContent><w:p>",
+        "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
+        "<w:r><w:rPr><w:color w:val=\"", ctx$dtc, "\"/>",
+          "<w:sz w:val=\"16\"/></w:rPr>",
+          "<w:t xml:space=\"preserve\">", lbl, "</w:t></w:r>",
+      "</w:p></w:txbxContent></wps:txbx>",
+      "<wps:bodyPr anchor=\"ctr\"><a:normAutofit/></wps:bodyPr>",
+    "</wps:wsp>"
+  )
+
+  make_shape_anchor(x_abs, y_abs, w_emu, h_emu, shape_id, wsp_xml)
+}
+
+# emit_edge / emit_edge_label: retained for any future in-group use.
 
 emit_edge <- function(e, origin_x_px, origin_y_px, ctx, ctr) {
   path_d <- e$path_d %||% ""
