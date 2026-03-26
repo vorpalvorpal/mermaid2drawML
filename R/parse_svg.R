@@ -257,11 +257,14 @@ element_geometry <- function(el, pos) {
   tag <- xml2::xml_name(el)
   cx  <- pos[1]; cy <- pos[2]
 
+  # Capture any transform on the element itself (e.g., path label-containers
+  # have translate(-w/2, -h/2) to centre themselves on the node's translate point)
+  el_tf  <- xml2::xml_attr(el, "transform") %||% ""
+  el_off <- parse_translate(el_tf)   # c(dx, dy)
+
   if (tag == "rect") {
     w  <- as.numeric(xml2::xml_attr(el, "width")  %||% "0")
     h  <- as.numeric(xml2::xml_attr(el, "height") %||% "0")
-    x  <- as.numeric(xml2::xml_attr(el, "x")      %||% "0")
-    y  <- as.numeric(xml2::xml_attr(el, "y")      %||% "0")
     rx <- as.numeric(xml2::xml_attr(el, "rx")     %||% "0")
     # x/y are relative to translate point (which is the centre in mermaid)
     svg_cx <- cx          # already the centre
@@ -288,13 +291,66 @@ element_geometry <- function(el, pos) {
     r  <- as.numeric(xml2::xml_attr(el, "r") %||% "25")
     list(shape = "ellipse", svg_cx = cx, svg_cy = cy, svg_w = r * 2, svg_h = r * 2)
 
+  } else if (tag == "g") {
+    # Mermaid v11 renders all shapes as <g class="label-container ..."> groups
+    # containing rough/sketch path elements. "outer-path" class = roundRect/stadium.
+    el_cls <- xml2::xml_attr(el, "class") %||% ""
+    shape  <- if (grepl("outer-path", el_cls, fixed = TRUE)) "roundRect" else "rect"
+    bb     <- group_element_bbox(el)
+    if (is.null(bb))
+      return(list(shape = shape, svg_cx = cx + el_off[1], svg_cy = cy + el_off[2],
+                  svg_w = 60, svg_h = 30))
+    list(shape  = shape,
+         svg_cx = cx + el_off[1] + bb$cx,
+         svg_cy = cy + el_off[2] + bb$cy,
+         svg_w  = bb$w,
+         svg_h  = bb$h)
+
   } else {
-    # path — use bounding box approximation
-    d  <- xml2::xml_attr(el, "d") %||% ""
-    bb <- path_bbox(d)
-    list(shape = "rect", svg_cx = cx + bb$cx, svg_cy = cy + bb$cy,
-         svg_w = bb$w, svg_h = bb$h)
+    # path (or other element): bbox via path parser.
+    # Account for the element's own transform (e.g., cylinder label-containers
+    # use translate(-rx, -cy_offset) to centre the path on the node origin).
+    d     <- xml2::xml_attr(el, "d") %||% ""
+    bb    <- path_bbox(d)
+    # Detect cylinder: path uses arc commands
+    shape <- if (grepl("[Aa]", d, perl = TRUE)) "cylinder" else "rect"
+    list(shape  = shape,
+         svg_cx = cx + el_off[1] + bb$cx,
+         svg_cy = cy + el_off[2] + bb$cy,
+         svg_w  = bb$w,
+         svg_h  = bb$h)
   }
+}
+
+# Aggregate bounding box from all descendant <path> elements inside a <g>.
+# Returns list(cx, cy, w, h) in the g's local coordinate space,
+# or NULL if no usable paths are found.
+group_element_bbox <- function(g_el) {
+  min_x <- Inf; max_x <- -Inf
+  min_y <- Inf; max_y <- -Inf
+
+  child_paths <- xml2::xml_find_all(g_el, ".//path")
+  for (p in child_paths) {
+    p_tf  <- xml2::xml_attr(p, "transform") %||% ""
+    p_off <- parse_translate(p_tf)
+    d     <- xml2::xml_attr(p, "d") %||% ""
+    if (!nzchar(d)) next
+    bb <- path_bbox(d)
+    if (bb$w <= 1 && bb$h <= 1) next   # skip degenerate paths
+    hw <- bb$w / 2; hh <- bb$h / 2
+    lx <- p_off[1] + bb$cx - hw;  rx <- p_off[1] + bb$cx + hw
+    ty <- p_off[2] + bb$cy - hh;  by <- p_off[2] + bb$cy + hh
+    if (lx < min_x) min_x <- lx
+    if (rx > max_x) max_x <- rx
+    if (ty < min_y) min_y <- ty
+    if (by > max_y) max_y <- by
+  }
+
+  if (is.infinite(min_x)) return(NULL)
+  list(cx = (min_x + max_x) / 2,
+       cy = (min_y + max_y) / 2,
+       w  = max(max_x - min_x, 1),
+       h  = max(max_y - min_y, 1))
 }
 
 parse_polygon_points <- function(pts_str) {
@@ -829,9 +885,26 @@ resolve_path <- function(cmds) {
     } else if (cmd %in% c("Z", "z")) {
       out[[length(out) + 1L]] <- list(cmd = "Z")
       cx <- sx; cy <- sy
+    } else if (cmd == "A") {
+      # A rx ry x-rot large-arc sweep x y  (absolute, groups of 7)
+      if (length(args) >= 7L) {
+        pts <- matrix(args, ncol = 7, byrow = TRUE)
+        for (i in seq_len(nrow(pts))) {
+          cx <- pts[i, 6]; cy <- pts[i, 7]
+          out[[length(out) + 1L]] <- list(cmd = "L", x = cx, y = cy)
+        }
+      }
+    } else if (cmd == "a") {
+      # a rx ry x-rot large-arc sweep dx dy  (relative, groups of 7)
+      if (length(args) >= 7L) {
+        pts <- matrix(args, ncol = 7, byrow = TRUE)
+        for (i in seq_len(nrow(pts))) {
+          cx <- cx + pts[i, 6]; cy <- cy + pts[i, 7]
+          out[[length(out) + 1L]] <- list(cmd = "L", x = cx, y = cy)
+        }
+      }
     }
-    # S, s, T, t, A, a — approximate with lineTo for now
-    # (mermaid doesn't commonly emit these for flowchart edges)
+    # S, s, T, t — approximate with lineTo; not commonly used in mermaid flowcharts
   }
   out
 }
