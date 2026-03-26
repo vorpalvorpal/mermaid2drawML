@@ -293,9 +293,21 @@ element_geometry <- function(el, pos) {
 
   } else if (tag == "g") {
     # Mermaid v11 renders all shapes as <g class="label-container ..."> groups
-    # containing rough/sketch path elements. "outer-path" class = roundRect/stadium.
-    el_cls <- xml2::xml_attr(el, "class") %||% ""
-    shape  <- if (grepl("outer-path", el_cls, fixed = TRUE)) "roundRect" else "rect"
+    # containing rough/sketch path elements.
+    #   "outer-path" class  → roundRect / stadium shape
+    #   1 child path, no outer-path → doc (folded-corner document page)
+    #   2 child paths, no outer-path → docs (stacked document pages)
+    el_cls     <- xml2::xml_attr(el, "class") %||% ""
+    n_children <- length(xml2::xml_find_all(el, ".//path"))
+    shape <- if (grepl("outer-path", el_cls, fixed = TRUE)) {
+      "roundRect"
+    } else if (n_children == 1L) {
+      "doc"
+    } else if (n_children >= 2L) {
+      "docs"
+    } else {
+      "rect"
+    }
     bb     <- group_element_bbox(el)
     if (is.null(bb))
       return(list(shape = shape, svg_cx = cx + el_off[1], svg_cy = cy + el_off[2],
@@ -432,7 +444,17 @@ extract_text_color <- function(shape_el, g) {
 .strip_important <- function(x) trimws(sub("\\s*!important.*$", "", x, perl = TRUE))
 
 extract_fill <- function(shape_el, g) {
-  for (el in list(shape_el, g)) {
+  # Mermaid v11 puts fill on child path elements inside the label-container <g>
+  candidates <- if (xml2::xml_name(shape_el) == "g") {
+    child_path <- xml2::xml_find_first(shape_el, ".//path[@style]")
+    if (!inherits(child_path, "xml_missing"))
+      list(child_path, shape_el, g)
+    else
+      list(shape_el, g)
+  } else {
+    list(shape_el, g)
+  }
+  for (el in candidates) {
     style <- xml2::xml_attr(el, "style") %||% ""
     m <- regmatches(style, regexpr("(?:^|;)\\s*fill:\\s*([^;]+)", style, perl = TRUE))
     if (length(m) > 0L) {
@@ -446,7 +468,17 @@ extract_fill <- function(shape_el, g) {
 }
 
 extract_stroke <- function(shape_el, g) {
-  for (el in list(shape_el, g)) {
+  # Mermaid v11 puts stroke on child path elements inside the label-container <g>
+  candidates <- if (xml2::xml_name(shape_el) == "g") {
+    child_path <- xml2::xml_find_first(shape_el, ".//path[@style]")
+    if (!inherits(child_path, "xml_missing"))
+      list(child_path, shape_el, g)
+    else
+      list(shape_el, g)
+  } else {
+    list(shape_el, g)
+  }
+  for (el in candidates) {
     style <- xml2::xml_attr(el, "style") %||% ""
     m <- regmatches(style, regexpr("(?:^|;)\\s*stroke:\\s*([^;]+)", style, perl = TRUE))
     if (length(m) > 0L) {
@@ -543,6 +575,28 @@ extract_subgraphs <- function(doc, style) {
     fill   <- extract_fill(rect_el, g)   # NA → <a:noFill/> (transparent border-only cluster)
     stroke <- extract_stroke(rect_el, g)
 
+    # stroke-width and text color from the rect's inline style
+    # (mermaid inlines `style="fill:... stroke:... stroke-width:Npx color:..."`)
+    rect_style <- xml2::xml_attr(rect_el, "style") %||% ""
+
+    sw_px <- NA_real_
+    m_sw  <- regmatches(rect_style,
+               regexpr("stroke-width:\\s*(\\d+(?:\\.\\d+)?)px", rect_style, perl = TRUE))
+    if (length(m_sw) > 0L) {
+      v <- suppressWarnings(as.numeric(sub("px.*", "", sub(".*stroke-width:\\s*", "", m_sw))))
+      if (!is.na(v) && v > 0) sw_px <- v
+    }
+
+    sg_color <- NA_character_
+    m_col    <- regmatches(rect_style,
+                  regexpr("(?:^|;)\\s*color:\\s*([^;!]+)", rect_style, perl = TRUE))
+    if (length(m_col) > 0L) {
+      col <- .strip_important(sub(".*color:\\s*", "", m_col))
+      if (nzchar(col)) sg_color <- parse_css_colour(col)
+    }
+    # Fallback: use stroke color for label text when no explicit color property
+    if (is.na(sg_color)) sg_color <- stroke %||% NA_character_
+
     # Label text from cluster-label child
     label_g <- xml2::xml_find_first(g, ".//*[contains(@class,'cluster-label')]")
     label   <- if (!inherits(label_g, "xml_missing")) trimws(xml2::xml_text(label_g)) else ""
@@ -552,15 +606,17 @@ extract_subgraphs <- function(doc, style) {
     user_class  <- if (length(user_class) > 0L) user_class[1L] else NA_character_
 
     list(
-      id     = svg_id,
-      label  = label,
-      svg_x  = x,
-      svg_y  = y,
-      svg_w  = w,
-      svg_h  = h,
-      fill   = fill,                         # keep NA for transparent
-      stroke = stroke %||% default_stroke,
-      class  = user_class
+      id           = svg_id,
+      label        = label,
+      svg_x        = x,
+      svg_y        = y,
+      svg_w        = w,
+      svg_h        = h,
+      fill         = fill,                   # keep NA for transparent
+      stroke       = stroke %||% default_stroke,
+      stroke_width = sw_px,
+      color        = sg_color,
+      class        = user_class
     )
   })
 
@@ -568,15 +624,17 @@ extract_subgraphs <- function(doc, style) {
   if (length(rows) == 0L) return(empty_subgraphs_tbl())
 
   tibble::tibble(
-    id     = vapply(rows, `[[`, character(1), "id"),
-    label  = vapply(rows, `[[`, character(1), "label"),
-    svg_x  = vapply(rows, `[[`, numeric(1),   "svg_x"),
-    svg_y  = vapply(rows, `[[`, numeric(1),   "svg_y"),
-    svg_w  = vapply(rows, `[[`, numeric(1),   "svg_w"),
-    svg_h  = vapply(rows, `[[`, numeric(1),   "svg_h"),
-    fill   = vapply(rows, `[[`, character(1), "fill"),
-    stroke = vapply(rows, `[[`, character(1), "stroke"),
-    class  = vapply(rows, `[[`, character(1), "class")
+    id           = vapply(rows, `[[`, character(1), "id"),
+    label        = vapply(rows, `[[`, character(1), "label"),
+    svg_x        = vapply(rows, `[[`, numeric(1),   "svg_x"),
+    svg_y        = vapply(rows, `[[`, numeric(1),   "svg_y"),
+    svg_w        = vapply(rows, `[[`, numeric(1),   "svg_w"),
+    svg_h        = vapply(rows, `[[`, numeric(1),   "svg_h"),
+    fill         = vapply(rows, `[[`, character(1), "fill"),
+    stroke       = vapply(rows, `[[`, character(1), "stroke"),
+    stroke_width = vapply(rows, function(r) r$stroke_width %||% NA_real_, numeric(1)),
+    color        = vapply(rows, function(r) r$color %||% NA_character_,   character(1)),
+    class        = vapply(rows, `[[`, character(1), "class")
   )
 }
 
@@ -585,7 +643,8 @@ empty_subgraphs_tbl <- function() {
     id = character(), label = character(),
     svg_x = numeric(), svg_y = numeric(),
     svg_w = numeric(), svg_h = numeric(),
-    fill = character(), stroke = character(), class = character()
+    fill = character(), stroke = character(),
+    stroke_width = numeric(), color = character(), class = character()
   )
 }
 
@@ -596,7 +655,7 @@ extract_edges <- function(doc, nodes_tbl) {
   # Each path has id like "L-A-B-0".
   # Edge labels are in <g class="edgeLabels"> or "edgeLabel".
 
-  paths <- xml2::xml_find_all(doc, ".//*[self::path or self::polyline][contains(@id,'L-') or contains(@class,'edge')]")
+  paths <- xml2::xml_find_all(doc, ".//*[self::path or self::polyline][contains(@id,'L-') or contains(@id,'L_') or contains(@class,'edge')]")
 
   # Also look for paths inside edgePaths containers
   edge_containers <- xml2::xml_find_all(doc, ".//*[contains(@class,'edgePath') or contains(@class,'edgePaths')]")
@@ -630,6 +689,7 @@ extract_edges <- function(doc, nodes_tbl) {
     arrow_start = vapply(rows, `[[`, character(1), "arrow_start"),
     arrow_end   = vapply(rows, `[[`, character(1), "arrow_end"),
     line_type   = vapply(rows, `[[`, character(1), "line_type"),
+    stroke      = vapply(rows, function(r) r$stroke %||% NA_character_, character(1)),
     label_x     = vapply(rows, function(r) r$label_x %||% NA_real_, numeric(1)),
     label_y     = vapply(rows, function(r) r$label_y %||% NA_real_, numeric(1))
   )
@@ -640,10 +700,17 @@ parse_one_edge <- function(path_el, doc, nodes_tbl) {
   d       <- xml2::xml_attr(path_el, "d")  %||% ""
   if (!nzchar(d)) return(NULL)
 
-  # Parse from/to from edge id "L-A-B-0" or "L-A-B"
+  # Parse from/to — support both mermaid v11 underscore format (L_A_B_0_0)
+  # and older hyphen format (L-A-B-0). Node IDs are assumed not to contain _.
   from <- NA_character_; to <- NA_character_
-  m <- regmatches(edge_id, regexec("L-([^-]+)-([^-]+)", edge_id, perl = TRUE))[[1]]
-  if (length(m) == 3L) { from <- m[2]; to <- m[3] }
+  m <- regmatches(edge_id,
+        regexec("^L_([^_]+)_([^_]+)_\\d+_\\d+$", edge_id, perl = TRUE))[[1]]
+  if (length(m) == 3L) {
+    from <- m[2]; to <- m[3]
+  } else {
+    m <- regmatches(edge_id, regexec("L-([^-]+)-([^-]+)", edge_id, perl = TRUE))[[1]]
+    if (length(m) == 3L) { from <- m[2]; to <- m[3] }
+  }
 
   # Arrow type from marker attributes
   me  <- xml2::xml_attr(path_el, "marker-end")   %||% ""
@@ -651,16 +718,27 @@ parse_one_edge <- function(path_el, doc, nodes_tbl) {
   arrow_end   <- if (nzchar(me)) classify_marker(me) else "none"
   arrow_start <- if (nzchar(ms)) classify_marker(ms) else "none"
 
-  # Line type from class or stroke-dasharray
+  # Line type: use new mermaid v11 CSS class names (edge-pattern-*) first,
+  # then fall back to legacy class/style heuristics.
+  # "thick" must match edge-thickness-thick specifically (not edge-thickness-normal).
   cl    <- xml2::xml_attr(path_el, "class") %||% ""
   style <- xml2::xml_attr(path_el, "style") %||% ""
-  line_type <- if (grepl("dashed|dotted|dash", cl, ignore.case = TRUE) ||
+  line_type <- if (grepl("edge-pattern-dashed|edge-pattern-dotted", cl) ||
                    grepl("stroke-dasharray", style, ignore.case = TRUE)) {
     "dashed"
-  } else if (grepl("thick", cl, ignore.case = TRUE)) {
+  } else if (grepl("edge-thickness-thick\\b", cl)) {
     "thick"
   } else {
     "solid"
+  }
+
+  # Stroke colour from inline style (linkStyle rules are inlined by mermaid-cli)
+  stroke_col <- NA_character_
+  m_sc <- regmatches(style,
+            regexpr("(?:^|;)\\s*stroke:\\s*([^;!]+)", style, perl = TRUE))
+  if (length(m_sc) > 0L) {
+    col <- .strip_important(sub(".*stroke:\\s*", "", m_sc))
+    if (nzchar(col) && col != "none") stroke_col <- parse_css_colour(col)
   }
 
   # Look for matching edge label
@@ -675,6 +753,7 @@ parse_one_edge <- function(path_el, doc, nodes_tbl) {
     arrow_start = arrow_start,
     arrow_end   = arrow_end,
     line_type   = line_type,
+    stroke      = stroke_col,
     label_x     = lbl_info$x,
     label_y     = lbl_info$y
   )
@@ -717,7 +796,8 @@ empty_edges_tbl <- function() {
     id = character(), from = character(), to = character(),
     label = character(), path_d = character(),
     arrow_start = character(), arrow_end = character(),
-    line_type = character(), label_x = numeric(), label_y = numeric()
+    line_type = character(), stroke = character(),
+    label_x = numeric(), label_y = numeric()
   )
 }
 

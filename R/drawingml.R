@@ -35,6 +35,8 @@
   hexagon       = "hexagon",
   parallelogram = "parallelogram",
   cylinder      = "can",
+  doc           = "foldedCorner",
+  docs          = "rect",          # no DrawingML equivalent; use plain rect
   text          = "rect"
 )
 
@@ -454,7 +456,14 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
   }
 
   stroke_hex <- sg$stroke %||% "AAAA33"
-  sw_emu     <- max(as.integer(ctx$sw_pt * 12700 * ctx$scale / 9525), 1588L)
+  # Use per-subgraph stroke-width from SVG (stroke-width:Npx in inline style)
+  # if available; otherwise fall back to the global default.
+  sg_sw_pt   <- sg$stroke_width %||% NA_real_
+  if (!is.na(sg_sw_pt) && sg_sw_pt > 0) {
+    sw_emu <- max(as.integer(round(sg_sw_pt * 12700)), 1588L)
+  } else {
+    sw_emu <- max(as.integer(ctx$sw_pt * 12700 * ctx$scale / 9525), 1588L)
+  }
   stroke_xml <- paste0(
     "<a:ln w=\"", sw_emu, "\">",
     "<a:solidFill><a:srgbClr val=\"", stroke_hex, "\"/></a:solidFill>",
@@ -462,7 +471,9 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
   )
 
   label    <- xml_escape(strip_html(sg$label %||% ""))
-  text_col <- if (!is.na(fill_hex) && is_dark(fill_hex)) "FFFFFF" else ctx$dtc
+  # Use the subgraph's own colour for its label (from SVG `color:` property or stroke)
+  text_col <- sg$color %||% NA_character_
+  if (is.na(text_col)) text_col <- if (!is.na(fill_hex) && is_dark(fill_hex)) "FFFFFF" else ctx$dtc
   l_ins    <- max(as.integer(91440 * ctx$scale / 9525), 9144L)
   t_ins    <- max(as.integer(45720 * ctx$scale / 9525), 4572L)
 
@@ -760,7 +771,9 @@ emit_edge <- function(e, origin_x_px, origin_y_px, ctx, ctr) {
         cg$xml,
         "<a:noFill/>",
         "<a:ln w=\"", sw_emu, "\">",
-          "<a:solidFill><a:srgbClr val=\"", ctx$edge_stroke, "\"/></a:solidFill>",
+          "<a:solidFill><a:srgbClr val=\"",
+            if (!is.na(e$stroke %||% NA_character_)) e$stroke else ctx$edge_stroke,
+          "\"/></a:solidFill>",
           dash_xml,
           make_end(e$arrow_start, "head"),
           make_end(e$arrow_end,   "tail"),
