@@ -299,8 +299,14 @@ element_geometry <- function(el, pos) {
     #   2 child paths, no outer-path → docs (stacked document pages)
     el_cls     <- xml2::xml_attr(el, "class") %||% ""
     n_children <- length(xml2::xml_find_all(el, ".//path"))
+    # win-pane: 1 child path + positive x/y translate (e.g. translate(2.5, 2.5))
+    el_tf_str <- xml2::xml_attr(el, "transform") %||% ""
+    el_off_g  <- parse_translate(el_tf_str)
+    is_winpane <- n_children == 1L && el_off_g[1] > 0 && el_off_g[2] > 0
     shape <- if (grepl("outer-path", el_cls, fixed = TRUE)) {
       "roundRect"
+    } else if (is_winpane) {
+      "winPane"
     } else if (n_children == 1L) {
       "doc"
     } else if (n_children >= 2L) {

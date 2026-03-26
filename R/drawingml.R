@@ -37,6 +37,7 @@
   cylinder      = "can",
   doc           = "foldedCorner",
   docs          = "foldedCorner",  # stacked-pages shape; foldedCorner is closest preset
+  winPane       = "flowChartDisplay",  # monitor/screen shape — closest preset for website
   text          = "rect"
 )
 
