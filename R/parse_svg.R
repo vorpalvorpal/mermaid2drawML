@@ -256,7 +256,38 @@ extract_svg_style <- function(doc) {
        edge_stroke            = edge_stroke,
        edge_sw_px             = edge_sw_px,
        cluster_fill           = cluster_fill,
-       cluster_stroke         = cluster_stroke)
+       cluster_stroke         = cluster_stroke,
+       class_styles           = extract_class_styles(style_text))
+}
+
+# Parse per-class CSS rules from the SVG <style> block and return a named list
+# mapping class name → list(font_size_px, font_bold).  Only classes that carry
+# at least one of those properties are included.  Mermaid emits classDef rules
+# as ".ClassName>*{ ... }" so we target that selector pattern.
+extract_class_styles <- function(style_text) {
+  # Match ".ClassName>*{...}" blocks (the selector mermaid uses for classDefs)
+  m <- gregexpr("\\.[A-Za-z][A-Za-z0-9_-]*\\s*>\\s*\\*\\s*\\{[^}]*",
+                style_text, perl = TRUE)
+  blocks <- regmatches(style_text, m)[[1]]
+
+  result <- list()
+  for (blk in blocks) {
+    cn_hit <- regmatches(blk, regexpr("^\\.[A-Za-z][A-Za-z0-9_-]*", blk, perl = TRUE))
+    if (length(cn_hit) == 0L) next
+    cn <- sub("^\\.", "", cn_hit)
+
+    fs_hit <- regmatches(blk, regexpr("font-size:\\s*([0-9.]+)px", blk, perl = TRUE))
+    font_size_px <- if (length(fs_hit) > 0L)
+      suppressWarnings(as.numeric(sub("px.*", "", sub(".*font-size:\\s*", "", fs_hit))))
+    else NA_real_
+
+    fw_hit <- regmatches(blk, regexpr("font-weight:\\s*bold", blk, perl = TRUE))
+    font_bold <- length(fw_hit) > 0L
+
+    if (!is.na(font_size_px) || font_bold)
+      result[[cn]] <- list(font_size_px = font_size_px, font_bold = font_bold)
+  }
+  result
 }
 
 # ── Node extraction ────────────────────────────────────────────────────────
@@ -780,6 +811,12 @@ extract_subgraphs <- function(doc, style) {
     user_class  <- setdiff(classes, known)
     user_class  <- if (length(user_class) > 0L) user_class[1L] else NA_character_
 
+    # Per-class font properties from classDef CSS rules
+    cs           <- if (!is.null(user_class) && !is.na(user_class))
+                      style$class_styles[[user_class]] else NULL
+    font_size_px <- cs$font_size_px %||% NA_real_
+    font_bold    <- isTRUE(cs$font_bold)
+
     list(
       id           = svg_id,
       label        = label,
@@ -791,7 +828,9 @@ extract_subgraphs <- function(doc, style) {
       stroke       = stroke %||% default_stroke,
       stroke_width = sw_px,
       color        = sg_color,
-      class        = user_class
+      class        = user_class,
+      font_size_px = font_size_px,
+      font_bold    = font_bold
     )
   })
 
@@ -809,7 +848,9 @@ extract_subgraphs <- function(doc, style) {
     stroke       = vapply(rows, `[[`, character(1), "stroke"),
     stroke_width = vapply(rows, function(r) r$stroke_width %||% NA_real_, numeric(1)),
     color        = vapply(rows, function(r) r$color %||% NA_character_,   character(1)),
-    class        = vapply(rows, `[[`, character(1), "class")
+    class        = vapply(rows, `[[`, character(1), "class"),
+    font_size_px = vapply(rows, function(r) r$font_size_px %||% NA_real_, numeric(1)),
+    font_bold    = vapply(rows, function(r) isTRUE(r$font_bold),          logical(1))
   )
 }
 
@@ -819,7 +860,8 @@ empty_subgraphs_tbl <- function() {
     svg_x = numeric(), svg_y = numeric(),
     svg_w = numeric(), svg_h = numeric(),
     fill = character(), stroke = character(),
-    stroke_width = numeric(), color = character(), class = character()
+    stroke_width = numeric(), color = character(), class = character(),
+    font_size_px = numeric(), font_bold = logical()
   )
 }
 

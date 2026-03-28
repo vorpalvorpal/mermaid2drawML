@@ -92,7 +92,8 @@
 # Build the <w:rPr> XML for a labelled text run.
 # Using a single helper ensures font, size, and colour are consistent
 # everywhere and makes it easy to change them in one place.
-text_rpr_xml <- function(text_col, ctx) {
+text_rpr_xml <- function(text_col, ctx, bold = FALSE, font_size_hp = NULL) {
+  hp <- font_size_hp %||% ctx$font_size_hp
   paste0(
     "<w:rPr>",
       "<w:rFonts",
@@ -100,9 +101,10 @@ text_rpr_xml <- function(text_col, ctx) {
         " w:hAnsi=\"",    ctx$font_family, "\"",
         " w:cs=\"",       ctx$font_family, "\"",
       "/>",
+      if (bold) "<w:b/>" else "",
       "<w:color w:val=\"", text_col, "\"/>",
-      "<w:sz w:val=\"",    ctx$font_size_hp, "\"/>",
-      "<w:szCs w:val=\"",  ctx$font_size_hp, "\"/>",
+      "<w:sz w:val=\"",    hp, "\"/>",
+      "<w:szCs w:val=\"",  hp, "\"/>",
     "</w:rPr>"
   )
 }
@@ -110,7 +112,9 @@ text_rpr_xml <- function(text_col, ctx) {
 # Build <w:txbxContent> XML for a label that may contain <br> line breaks.
 # Splits on <br>, <br/>, <br />, or \n before stripping HTML so that each
 # logical line becomes its own <w:p> inside the text box.
-label_txbx_xml <- function(raw_label, text_col, jc = "center", ctx) {
+# bold / font_size_hp: optional overrides read from per-element SVG properties.
+label_txbx_xml <- function(raw_label, text_col, jc = "center", ctx,
+                            bold = FALSE, font_size_hp = NULL) {
   segs <- strsplit(raw_label %||% "", "<br\\s*/?>|\\n", perl = TRUE)[[1]]
   segs <- vapply(segs, function(s) xml_escape(strip_html(s)), character(1L),
                  USE.NAMES = FALSE)
@@ -118,7 +122,7 @@ label_txbx_xml <- function(raw_label, text_col, jc = "center", ctx) {
   while (length(segs) > 1L && !nzchar(segs[length(segs)])) segs <- segs[-length(segs)]
   if (length(segs) == 0L) segs <- ""
 
-  rpr <- text_rpr_xml(text_col, ctx)
+  rpr <- text_rpr_xml(text_col, ctx, bold = bold, font_size_hp = font_size_hp)
   ppr <- if (!is.null(jc) && nzchar(jc))
     paste0("<w:pPr><w:jc w:val=\"", jc, "\"/></w:pPr>") else ""
 
@@ -610,6 +614,12 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
   text_col <- sg$color %||% NA_character_
   if (is.na(text_col)) text_col <- if (!is.na(fill_hex) && is_dark(fill_hex)) "FFFFFF" else ctx$dtc
 
+  # Per-subgraph font properties from classDef CSS rules (font_size_px / font_bold)
+  sg_font_size_px <- sg$font_size_px %||% NA_real_
+  sg_font_size_hp <- if (!is.na(sg_font_size_px))
+    max(as.integer(round(sg_font_size_px * 1.5)), 14L) else NULL
+  sg_bold <- isTRUE(sg$font_bold)
+
   descr <- jsonlite::toJSON(list(
     v = "1", type = "subgraph",
     id = sg$id %||% "", label = sg$label %||% "",
@@ -631,7 +641,8 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
         "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>",
         fill_xml, stroke_xml,
       "</wps:spPr>",
-      "<wps:txbx>", label_txbx_xml(sg$label %||% "", text_col, "center", ctx), "</wps:txbx>",
+      "<wps:txbx>", label_txbx_xml(sg$label %||% "", text_col, "center", ctx,
+                                    bold = sg_bold, font_size_hp = sg_font_size_hp), "</wps:txbx>",
       "<wps:bodyPr anchor=\"t\" ",
         "lIns=\"0\" rIns=\"0\" ",
         "tIns=\"0\" bIns=\"0\">",
