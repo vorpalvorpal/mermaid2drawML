@@ -28,6 +28,7 @@
 )
 
 .shape_map <- c(
+  # Basic shapes
   rect          = "rect",
   roundRect     = "roundRect",
   diamond       = "diamond",
@@ -35,13 +36,70 @@
   hexagon       = "hexagon",
   parallelogram = "parallelogram",
   cylinder      = "can",
-  doc           = "foldedCorner",
-  docs          = "foldedCorner",  # stacked-pages shape; foldedCorner is closest preset
-  winPane       = "flowChartDisplay",  # monitor/screen shape — closest preset for website
-  text          = "rect"
+  # Document shapes (native DrawingML presets)
+  doc           = "flowChartDocument",
+  docs          = "flowChartMultidocument",
+  # Flowchart shapes
+  winPane       = "flowChartInternalStorage",
+  delay         = "flowChartDelay",
+  manualInput   = "flowChartManualInput",
+  manualOp      = "flowChartManualOperation",
+  trapezoid     = "trapezoid",
+  collate       = "flowChartCollate",
+  display       = "flowChartDisplay",
+  subprocess    = "flowChartPredefinedProcess",
+  punchedTape   = "flowChartPunchedTape",
+  storedData    = "flowChartOnlineStorage",
+  crossCirc     = "flowChartSummingJunction",
+  hCyl          = "flowChartMagneticDisk",
+  linCyl        = "flowChartMagneticDrum",
+  extract       = "flowChartExtract",
+  mergeTri      = "flowChartMerge",
+  notchPent     = "flowChartPreparation",
+  # Other presets
+  bolt          = "lightningBolt",
+  notchRect     = "snip1Rect",
+  bang          = "irregularSeal1",
+  cloud         = "cloud",
+  brace         = "leftBrace",
+  braceR        = "rightBrace",
+  braces        = "bracePair",
+  leanR         = "parallelogram",
+  leanL         = "parallelogram",    # uses flipH="1" in xfrm
+  # Special fill shapes (forced black; ellipse/rect geometry)
+  junction      = "ellipse",          # f-circ — always solid black
+  fork          = "rect",             # fork — always solid black
+  # Double-outline / line-decorated shapes (approximations — TODO: custom geometry)
+  dblCirc       = "ellipse",          # dbl-circ — TODO: double ellipse
+  frCirc        = "ellipse",          # fr-circ — TODO: frame circle
+  linDoc        = "flowChartDocument",# lin-doc — approximation
+  linRect       = "rect",             # lin-rect — approximation
+  odd           = "rect",             # odd — SVG custom TODO
+  tagDoc        = "flowChartDocument",# tag-doc — approximation
+  tagRect       = "rect",             # tag-rect — approximation
+  stRect        = "rect",             # st-rect — used only by st_rect_page_wsp
+  text          = "rect"              # transparent annotation label
 )
 
 # ── ID counter ─────────────────────────────────────────────────────────────
+
+# Build the <w:rPr> XML for a labelled text run.
+# Using a single helper ensures font, size, and colour are consistent
+# everywhere and makes it easy to change them in one place.
+text_rpr_xml <- function(text_col, ctx) {
+  paste0(
+    "<w:rPr>",
+      "<w:rFonts",
+        " w:ascii=\"",    ctx$font_family, "\"",
+        " w:hAnsi=\"",    ctx$font_family, "\"",
+        " w:cs=\"",       ctx$font_family, "\"",
+      "/>",
+      "<w:color w:val=\"", text_col, "\"/>",
+      "<w:sz w:val=\"",    ctx$font_size_hp, "\"/>",
+      "<w:szCs w:val=\"",  ctx$font_size_hp, "\"/>",
+    "</w:rPr>"
+  )
+}
 
 new_id_counter <- function(start = 1L) {
   n <- as.integer(start)
@@ -92,6 +150,10 @@ build_diagram_xml <- function(svg_data,
   # Scale font size proportionally; floor at 8 half-pts (4pt).
   font_size_hp <- max(as.integer(round(sty$font_size_px * scale / 6350)), 8L)
 
+  # Font family: use whatever mermaid/Chromium measured the text in, so that
+  # Word's text renderer uses the same metrics and text fits the same boxes.
+  font_family <- sty$font_family %||% "Trebuchet MS"
+
   # Edge stroke: colour from SVG stylesheet; width scaled from SVG px, min 0.75pt.
   # Word renders sub-0.5pt lines as hairlines; 0.75pt keeps edges clearly visible.
   edge_stroke <- sty$edge_stroke %||% default_stroke
@@ -103,6 +165,7 @@ build_diagram_xml <- function(svg_data,
     vb             = vb,
     scale          = scale,
     font_size_hp   = font_size_hp,
+    font_family    = font_family,
     edge_stroke    = edge_stroke,
     edge_sw_emu    = edge_sw_emu,
     default_fill   = default_fill,
@@ -477,8 +540,6 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
   # Use the subgraph's own colour for its label (from SVG `color:` property or stroke)
   text_col <- sg$color %||% NA_character_
   if (is.na(text_col)) text_col <- if (!is.na(fill_hex) && is_dark(fill_hex)) "FFFFFF" else ctx$dtc
-  l_ins    <- max(as.integer(91440 * ctx$scale / 9525), 9144L)
-  t_ins    <- max(as.integer(45720 * ctx$scale / 9525), 4572L)
 
   descr <- jsonlite::toJSON(list(
     v = "1", type = "subgraph",
@@ -503,16 +564,12 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
       "</wps:spPr>",
       "<wps:txbx><w:txbxContent><w:p>",
         "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-        "<w:r><w:rPr>",
-          "<w:color w:val=\"", text_col, "\"/>",
-          "<w:sz w:val=\"", ctx$font_size_hp, "\"/>",
-          "<w:szCs w:val=\"", ctx$font_size_hp, "\"/>",
-        "</w:rPr>",
+        "<w:r>", text_rpr_xml(text_col, ctx),
           "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
       "</w:p></w:txbxContent></wps:txbx>",
       "<wps:bodyPr anchor=\"t\" ",
-        "lIns=\"", l_ins, "\" rIns=\"", l_ins, "\" ",
-        "tIns=\"", t_ins, "\" bIns=\"", t_ins, "\">",
+        "lIns=\"0\" rIns=\"0\" ",
+        "tIns=\"0\" bIns=\"0\">",
         "<a:normAutofit/></wps:bodyPr>",
     "</wps:wsp>"
   )
@@ -528,10 +585,204 @@ emit_node <- function(nd, origin_x_px, origin_y_px, ctx, ctr) {
   y_rel      <- as.integer(round((nd$svg_cy - origin_y_px) * scale)) - h_emu %/% 2L
   shape_name <- nd$shape %||% "rect"
 
-  if (shape_name %in% c("diamond", "hexagon", "parallelogram")) {
+  # stRect: custom stacked-rect implementation
+  if (shape_name == "stRect") {
+    return(emit_st_rect_grpSp(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr))
+  }
+
+  # Shapes that need the visual-wsp + text-overlay-wsp group approach:
+  # Non-rectangular geometries where Word's built-in text placement clips or
+  # misaligns the label (typically the same shapes that use foreignObject in SVG).
+  needs_group <- shape_name %in% c(
+    "diamond", "hexagon",
+    "parallelogram", "leanR", "leanL",
+    "trapezoid",
+    "extract",    # triangle (flowChartExtract)
+    "mergeTri",   # inverted triangle (flowChartMerge)
+    "notchPent",  # pentagon (flowChartPreparation)
+    "collate"     # bowtie (flowChartCollate)
+  )
+
+  if (needs_group) {
     emit_node_grpSp(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr)
   } else {
+    # All other shapes (rect, roundRect, ellipse, cylinder, flowChart*,
+    # cloud, bolt, bang, brace*, text, etc.) use a single wps:wsp with
+    # Word's built-in text body — no extra nesting required.
     node_wsp(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr)
+  }
+}
+
+# wpg:grpSp for docs (stacked document pages):
+# Two foldedCorner shapes offset from each other; front shape carries the text label.
+emit_docs_grpSp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
+  grp_id <- ctr$next_id()
+
+  # Stacking offset: ~18% of the smaller dimension, minimum 45720 EMU (0.05 in)
+  off    <- max(as.integer(round(min(w_emu, h_emu) * 0.18)), 45720L)
+  pg_w   <- w_emu - off
+  pg_h   <- h_emu - off
+
+  # Back page: offset to upper-right, same style, no text
+  back_xml  <- docs_page_wsp(nd, off, 0L,  pg_w, pg_h, with_text = FALSE, ctx, ctr)
+  # Front page: lower-left, with text label
+  front_xml <- docs_page_wsp(nd, 0L, off,  pg_w, pg_h, with_text = TRUE,  ctx, ctr)
+
+  make_nested_grpSp(grp_id,
+                    paste0("mermaid:node:", nd$id %||% ""),
+                    x_rel, y_rel, w_emu, h_emu,
+                    paste0(back_xml, front_xml))
+}
+
+docs_page_wsp <- function(nd, x_pg, y_pg, pg_w, pg_h, with_text, ctx, ctr) {
+  shape_id   <- ctr$next_id()
+  fill_hex   <- nd$fill   %||% NA_character_
+  stroke_hex <- nd$stroke %||% NA_character_
+
+  # Both pages are always solid (never transparent) so that the front document
+  # visually blocks the overlapping portion of the back document:
+  #   back page  — always white (paper/substrate colour)
+  #   front page — node fill colour, or white if the node has no fill
+  fill_xml <- if (!with_text) {
+    "<a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill>"
+  } else {
+    if (is.na(fill_hex))
+      "<a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill>"
+    else
+      paste0("<a:solidFill><a:srgbClr val=\"", fill_hex, "\"/></a:solidFill>")
+  }
+
+  sw_emu     <- max(as.integer(ctx$sw_pt * 12700 * ctx$scale / 9525), 1588L)
+  stroke_val <- if (!is.na(stroke_hex)) stroke_hex else ctx$default_stroke
+  stroke_xml <- paste0(
+    "<a:ln w=\"", sw_emu, "\">",
+    "<a:solidFill><a:srgbClr val=\"", stroke_val, "\"/></a:solidFill>",
+    "</a:ln>"
+  )
+
+  nv_xml <- make_nvSpPr(shape_id,
+                        paste0("mermaid:", if (with_text) "node" else "back", ":",
+                               nd$id %||% ""),
+                        "{}")
+  xfrm_xml <- paste0(
+    "<a:xfrm>",
+      "<a:off x=\"", x_pg, "\" y=\"", y_pg, "\"/>",
+      "<a:ext cx=\"", pg_w, "\" cy=\"", pg_h, "\"/>",
+    "</a:xfrm>"
+  )
+  geom_xml <- "<a:prstGeom prst=\"foldedCorner\"><a:avLst/></a:prstGeom>"
+
+  if (!with_text) {
+    paste0(
+      "<wps:wsp>", nv_xml,
+        "<wps:spPr>", xfrm_xml, geom_xml, fill_xml, stroke_xml, "</wps:spPr>",
+        "<wps:bodyPr><a:noAutofit/></wps:bodyPr>",
+      "</wps:wsp>"
+    )
+  } else {
+    is_transparent <- is.na(fill_hex)
+    label    <- xml_escape(strip_html(nd$label %||% nd$id %||% ""))
+    text_col <- node_text_colour(nd, is_transparent, fill_hex, ctx$dtc)
+        paste0(
+      "<wps:wsp>", nv_xml,
+        "<wps:spPr>", xfrm_xml, geom_xml, fill_xml, stroke_xml, "</wps:spPr>",
+        "<wps:txbx><w:txbxContent><w:p>",
+          "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
+          "<w:r>", text_rpr_xml(text_col, ctx),
+            "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
+        "</w:p></w:txbxContent></wps:txbx>",
+        "<wps:bodyPr anchor=\"ctr\" ",
+          "lIns=\"0\" rIns=\"0\" ",
+          "tIns=\"0\" bIns=\"0\">",
+          "<a:normAutofit/></wps:bodyPr>",
+      "</wps:wsp>"
+    )
+  }
+}
+
+# wpg:grpSp for st-rect (Multi-Process): two stacked rect shapes in a group.
+# Back page is white; front page carries the fill colour and text label.
+# Modelled on emit_docs_grpSp / docs_page_wsp but uses rect preset geometry.
+emit_st_rect_grpSp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
+  grp_id <- ctr$next_id()
+
+  # Stacking offset: ~18% of the smaller dimension, minimum 45720 EMU (0.05 in)
+  off    <- max(as.integer(round(min(w_emu, h_emu) * 0.18)), 45720L)
+  pg_w   <- w_emu - off
+  pg_h   <- h_emu - off
+
+  # Back page: offset to upper-right, no text
+  back_xml  <- st_rect_page_wsp(nd, off, 0L,  pg_w, pg_h, with_text = FALSE, ctx, ctr)
+  # Front page: lower-left, with text label
+  front_xml <- st_rect_page_wsp(nd, 0L, off,  pg_w, pg_h, with_text = TRUE,  ctx, ctr)
+
+  make_nested_grpSp(grp_id,
+                    paste0("mermaid:node:", nd$id %||% ""),
+                    x_rel, y_rel, w_emu, h_emu,
+                    paste0(back_xml, front_xml))
+}
+
+st_rect_page_wsp <- function(nd, x_pg, y_pg, pg_w, pg_h, with_text, ctx, ctr) {
+  shape_id   <- ctr$next_id()
+  fill_hex   <- nd$fill   %||% NA_character_
+  stroke_hex <- nd$stroke %||% NA_character_
+
+  # Back page is always white so it visually blocks the overlapping area.
+  # Front page uses the node fill colour (or white if no fill).
+  fill_xml <- if (!with_text) {
+    "<a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill>"
+  } else {
+    if (is.na(fill_hex))
+      "<a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill>"
+    else
+      paste0("<a:solidFill><a:srgbClr val=\"", fill_hex, "\"/></a:solidFill>")
+  }
+
+  sw_emu     <- max(as.integer(ctx$sw_pt * 12700 * ctx$scale / 9525), 1588L)
+  stroke_val <- if (!is.na(stroke_hex)) stroke_hex else ctx$default_stroke
+  stroke_xml <- paste0(
+    "<a:ln w=\"", sw_emu, "\">",
+    "<a:solidFill><a:srgbClr val=\"", stroke_val, "\"/></a:solidFill>",
+    "</a:ln>"
+  )
+
+  nv_xml <- make_nvSpPr(shape_id,
+                        paste0("mermaid:", if (with_text) "node" else "back", ":",
+                               nd$id %||% ""),
+                        "{}")
+  xfrm_xml <- paste0(
+    "<a:xfrm>",
+      "<a:off x=\"", x_pg, "\" y=\"", y_pg, "\"/>",
+      "<a:ext cx=\"", pg_w, "\" cy=\"", pg_h, "\"/>",
+    "</a:xfrm>"
+  )
+  geom_xml <- "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>"
+
+  if (!with_text) {
+    paste0(
+      "<wps:wsp>", nv_xml,
+        "<wps:spPr>", xfrm_xml, geom_xml, fill_xml, stroke_xml, "</wps:spPr>",
+        "<wps:bodyPr><a:noAutofit/></wps:bodyPr>",
+      "</wps:wsp>"
+    )
+  } else {
+    is_transparent <- is.na(fill_hex)
+    label    <- xml_escape(strip_html(nd$label %||% nd$id %||% ""))
+    text_col <- node_text_colour(nd, is_transparent, fill_hex, ctx$dtc)
+        paste0(
+      "<wps:wsp>", nv_xml,
+        "<wps:spPr>", xfrm_xml, geom_xml, fill_xml, stroke_xml, "</wps:spPr>",
+        "<wps:txbx><w:txbxContent><w:p>",
+          "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
+          "<w:r>", text_rpr_xml(text_col, ctx),
+            "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
+        "</w:p></w:txbxContent></wps:txbx>",
+        "<wps:bodyPr anchor=\"ctr\" ",
+          "lIns=\"0\" rIns=\"0\" ",
+          "tIns=\"0\" bIns=\"0\">",
+          "<a:normAutofit/></wps:bodyPr>",
+      "</wps:wsp>"
+    )
   }
 }
 
@@ -565,8 +816,15 @@ node_wsp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
   fill_hex   <- nd$fill   %||% NA_character_
   stroke_hex <- nd$stroke %||% NA_character_
 
+  shape_name     <- nd$shape %||% "rect"
   is_transparent <- is.na(fill_hex)
-  fill_xml <- if (is_transparent) {
+
+  # junction (f-circ) and fork are always solid black regardless of SVG fill
+  fill_xml <- if (shape_name %in% c("junction", "fork")) {
+    "<a:solidFill><a:srgbClr val=\"000000\"/></a:solidFill>"
+  } else if (identical(shape_name, "text")) {
+    "<a:noFill/>"
+  } else if (is_transparent) {
     "<a:noFill/>"
   } else {
     paste0("<a:solidFill><a:srgbClr val=\"", fill_hex, "\"/></a:solidFill>")
@@ -574,27 +832,26 @@ node_wsp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
 
   sw_emu     <- max(as.integer(ctx$sw_pt * 12700 * scale / 9525), 1588L)
   stroke_val <- if (!is.na(stroke_hex)) stroke_hex else ctx$default_stroke
-  stroke_xml <- paste0(
-    "<a:ln w=\"", sw_emu, "\">",
-    "<a:solidFill><a:srgbClr val=\"", stroke_val, "\"/></a:solidFill>",
-    "</a:ln>"
-  )
+  stroke_xml <- if (identical(shape_name, "text")) {
+    "<a:ln w=\"0\"><a:noFill/></a:ln>"
+  } else {
+    paste0(
+      "<a:ln w=\"", sw_emu, "\">",
+      "<a:solidFill><a:srgbClr val=\"", stroke_val, "\"/></a:solidFill>",
+      "</a:ln>"
+    )
+  }
 
-  shape_name <- nd$shape %||% "rect"
   prst       <- .shape_map[shape_name]
   if (is.na(prst)) prst <- "rect"
 
-  if (identical(shape_name, "text")) {
-    fill_xml   <- "<a:noFill/>"
-    stroke_xml <- "<a:ln w=\"0\"><a:noFill/></a:ln>"
-  }
+  # leanL (lean-l) is the parallelogram preset mirrored horizontally
+  flip_attr <- if (identical(shape_name, "leanL")) " flipH=\"1\"" else ""
 
   geom_xml <- paste0("<a:prstGeom prst=\"", prst, "\"><a:avLst/></a:prstGeom>")
   label    <- xml_escape(strip_html(nd$label %||% nd$id %||% ""))
   text_col <- node_text_colour(nd, is_transparent, fill_hex, ctx$dtc)
 
-  l_ins <- max(as.integer(91440 * scale / 9525), 9144L)
-  t_ins <- max(as.integer(45720 * scale / 9525), 4572L)
 
   descr <- jsonlite::toJSON(list(
     v = "1", type = "node",
@@ -610,7 +867,7 @@ node_wsp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
     "<wps:wsp>",
       nv_xml,
       "<wps:spPr>",
-        "<a:xfrm>",
+        "<a:xfrm", flip_attr, ">",
           "<a:off x=\"", x_rel, "\" y=\"", y_rel, "\"/>",
           "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/>",
         "</a:xfrm>",
@@ -618,16 +875,12 @@ node_wsp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
       "</wps:spPr>",
       "<wps:txbx><w:txbxContent><w:p>",
         "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-        "<w:r><w:rPr>",
-          "<w:color w:val=\"", text_col, "\"/>",
-          "<w:sz w:val=\"", ctx$font_size_hp, "\"/>",
-          "<w:szCs w:val=\"", ctx$font_size_hp, "\"/>",
-        "</w:rPr>",
+        "<w:r>", text_rpr_xml(text_col, ctx),
           "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
       "</w:p></w:txbxContent></wps:txbx>",
       "<wps:bodyPr anchor=\"ctr\" ",
-        "lIns=\"", l_ins, "\" rIns=\"", l_ins, "\" ",
-        "tIns=\"", t_ins, "\" bIns=\"", t_ins, "\">",
+        "lIns=\"0\" rIns=\"0\" ",
+        "tIns=\"0\" bIns=\"0\">",
         "<a:normAutofit/></wps:bodyPr>",
     "</wps:wsp>"
   )
@@ -639,8 +892,12 @@ node_visual_wsp <- function(nd, w_emu, h_emu, ctx, ctr) {
   scale      <- ctx$scale
   fill_hex   <- nd$fill   %||% NA_character_
   stroke_hex <- nd$stroke %||% NA_character_
+  shape_name <- nd$shape  %||% "rect"
 
-  fill_xml <- if (is.na(fill_hex)) {
+  # Forced solid-black fill for junction (f-circ) and fork shapes
+  fill_xml <- if (shape_name %in% c("junction", "fork")) {
+    "<a:solidFill><a:srgbClr val=\"000000\"/></a:solidFill>"
+  } else if (is.na(fill_hex)) {
     "<a:noFill/>"
   } else {
     paste0("<a:solidFill><a:srgbClr val=\"", fill_hex, "\"/></a:solidFill>")
@@ -654,10 +911,12 @@ node_visual_wsp <- function(nd, w_emu, h_emu, ctx, ctr) {
     "</a:ln>"
   )
 
-  shape_name <- nd$shape %||% "rect"
   prst       <- .shape_map[shape_name]
   if (is.na(prst)) prst <- "rect"
   geom_xml   <- paste0("<a:prstGeom prst=\"", prst, "\"><a:avLst/></a:prstGeom>")
+
+  # leanL (lean-l) uses the parallelogram preset mirrored horizontally
+  flip_attr <- if (identical(shape_name, "leanL")) " flipH=\"1\"" else ""
 
   descr <- jsonlite::toJSON(list(
     v = "1", type = "node",
@@ -673,7 +932,7 @@ node_visual_wsp <- function(nd, w_emu, h_emu, ctx, ctr) {
     "<wps:wsp>",
       nv_xml,
       "<wps:spPr>",
-        "<a:xfrm>",
+        "<a:xfrm", flip_attr, ">",
           "<a:off x=\"0\" y=\"0\"/>",
           "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/>",
         "</a:xfrm>",
@@ -710,11 +969,7 @@ node_text_overlay_wsp <- function(nd, tx_rel, ty_rel, tw_emu, th_emu, ctx, ctr) 
       "</wps:spPr>",
       "<wps:txbx><w:txbxContent><w:p>",
         "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-        "<w:r><w:rPr>",
-          "<w:color w:val=\"", text_col, "\"/>",
-          "<w:sz w:val=\"", ctx$font_size_hp, "\"/>",
-          "<w:szCs w:val=\"", ctx$font_size_hp, "\"/>",
-        "</w:rPr>",
+        "<w:r>", text_rpr_xml(text_col, ctx),
           "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
       "</w:p></w:txbxContent></wps:txbx>",
       "<wps:bodyPr anchor=\"ctr\" lIns=\"0\" rIns=\"0\" tIns=\"0\" bIns=\"0\">",
@@ -760,7 +1015,7 @@ emit_edge <- function(e, origin_x_px, origin_y_px, ctx, ctr) {
 
   nv_xml <- make_nvCnPr(shape_id,
                          paste0("mermaid:edge:",
-                                e$from %||% "?", "\u2192", e$to %||% "?"),
+                                e$from %||% "?", "-", e$to %||% "?"),
                          descr)
 
   paste0(
@@ -816,8 +1071,7 @@ emit_edge_label <- function(e, origin_x_px, origin_y_px, ctx, ctr) {
       "</wps:spPr>",
       "<wps:txbx><w:txbxContent><w:p>",
         "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-        "<w:r><w:rPr><w:color w:val=\"", ctx$dtc, "\"/>",
-          "<w:sz w:val=\"16\"/></w:rPr>",
+        "<w:r>", text_rpr_xml(ctx$dtc, ctx),
           "<w:t xml:space=\"preserve\">", lbl, "</w:t></w:r>",
       "</w:p></w:txbxContent></wps:txbx>",
       "<wps:bodyPr anchor=\"ctr\"><a:normAutofit/></wps:bodyPr>",

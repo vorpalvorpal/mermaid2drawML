@@ -24,17 +24,80 @@
 #'   - `edges`: tibble of edge geometry
 #'   - `viewbox`: numeric(4) — minx, miny, width, height from the SVG viewBox
 #' @keywords internal
-parse_mermaid_svg <- function(svg, ast = NULL) {
+parse_mermaid_svg <- function(svg, ast = NULL, source = NULL) {
   doc <- xml2::read_xml(svg)
   xml2::xml_ns_strip(doc)                  # drop SVG namespace for easier xpath
 
   vb        <- parse_viewbox(doc)
   style     <- extract_svg_style(doc)
   nodes     <- extract_nodes(doc, ast)
+
+  # Override SVG-detected shapes with those declared in the mermaid source text
+  # using the v11 @{ shape: X } syntax.
+  if (!is.null(source) && nzchar(source)) {
+    overrides <- parse_source_shapes(source)
+    if (length(overrides) > 0L) {
+      for (nid in names(overrides)) {
+        rows <- nodes$id == nid
+        if (any(rows)) nodes$shape[rows] <- overrides[[nid]]
+      }
+    }
+  }
+
   subgraphs <- extract_subgraphs(doc, style)
   edges     <- extract_edges(doc, nodes)
 
   list(nodes = nodes, subgraphs = subgraphs, edges = edges, viewbox = vb, style = style)
+}
+
+#' Parse mermaid v11 @{ shape: X } declarations from source text
+#'
+#' @param code Character string of mermaid source code.
+#' @return A named character vector mapping node ID -> internal shape name.
+#' @keywords internal
+parse_source_shapes <- function(code) {
+  if (is.null(code) || !nzchar(code)) return(character(0))
+
+  # Map mermaid shape key -> internal name
+  key_to_internal <- c(
+    rect="rect", rounded="roundRect", stadium="roundRect",
+    diam="diamond", cyl="cylinder", circle="ellipse", "sm-circ"="ellipse",
+    hex="hexagon", doc="doc", docs="docs",
+    "win-pane"="winPane", "div-rect"="winPane",
+    delay="delay", "sl-rect"="manualInput",
+    "trap-t"="manualOp", "trap-b"="trapezoid",
+    hourglass="collate", "curv-trap"="display",
+    "fr-rect"="subprocess", flag="punchedTape",
+    "bow-rect"="storedData", "cross-circ"="crossCirc",
+    "h-cyl"="hCyl", "lin-cyl"="linCyl",
+    tri="extract", "flip-tri"="mergeTri",
+    bolt="bolt", "notch-rect"="notchRect",
+    bang="bang", cloud="cloud",
+    brace="brace", "brace-r"="braceR", braces="braces",
+    "lean-r"="leanR", "lean-l"="leanL",
+    "notch-pent"="notchPent", "f-circ"="junction",
+    fork="fork", "dbl-circ"="dblCirc", "fr-circ"="frCirc",
+    "lin-doc"="linDoc", "lin-rect"="linRect",
+    odd="odd", "tag-doc"="tagDoc", "tag-rect"="tagRect",
+    "st-rect"="stRect", text="text",
+    parallelogram="parallelogram"
+  )
+
+  # Match NodeId@{ ... shape: key ... } — key may have hyphens
+  pattern <- "([A-Za-z0-9_]+)@\\{[^}]*?\\bshape:\\s*([a-z][a-z0-9-]*)"
+  m    <- gregexpr(pattern, code, perl = TRUE)
+  hits <- regmatches(code, m)[[1]]
+  result <- character(0)
+  for (h in hits) {
+    parts <- regmatches(h, regexec(pattern, h, perl = TRUE))[[1]]
+    if (length(parts) == 3L) {
+      nid   <- parts[2]
+      key   <- parts[3]
+      iname <- key_to_internal[key]
+      if (!is.na(iname)) result[nid] <- iname
+    }
+  }
+  result
 }
 
 # ── viewBox ────────────────────────────────────────────────────────────────
@@ -73,6 +136,39 @@ extract_svg_style <- function(doc) {
   if (length(m) > 0L) {
     fs <- suppressWarnings(as.numeric(sub("px$", "", sub(".*font-size:\\s*", "", m[[1]]))))
     if (!is.na(fs) && fs > 0) font_size_px <- fs
+  }
+
+  # Font family -------------------------------------------------------------
+  # Mermaid emits e.g. font-family:"trebuchet ms",verdana,arial,sans-serif
+  # Extract the first (primary) font name and normalise to its proper display
+  # name so Word uses the same font that mermaid/Chromium measured the text in.
+  .font_name_map <- c(
+    "trebuchet ms"   = "Trebuchet MS",
+    "verdana"        = "Verdana",
+    "arial"          = "Arial",
+    "helvetica"      = "Helvetica",
+    "helvetica neue" = "Helvetica Neue",
+    "times new roman"= "Times New Roman",
+    "georgia"        = "Georgia",
+    "courier new"    = "Courier New",
+    "courier"        = "Courier",
+    "tahoma"         = "Tahoma",
+    "calibri"        = "Calibri",
+    "segoe ui"       = "Segoe UI"
+  )
+  font_family <- "Trebuchet MS"   # mermaid's compiled-in default
+  m <- regexec('font-family\\s*:\\s*([^;}\\n]+)', style_text, perl = TRUE)
+  hit <- regmatches(style_text, m)[[1]]
+  if (length(hit) == 2L) {
+    # hit[1] = full match, hit[2] = captured value e.g. '"trebuchet ms",verdana,...'
+    first <- trimws(strsplit(hit[2], ",")[[1]][1])
+    first <- tolower(gsub('"', '', first, fixed = TRUE))
+    if (first %in% names(.font_name_map)) {
+      font_family <- .font_name_map[[first]]
+    } else if (nzchar(first) && !first %in% c("sans-serif","serif","monospace")) {
+      # Title-case unknown font names (e.g. "open sans" -> "Open Sans")
+      font_family <- gsub("(^|\\s)(\\S)", "\\1\\U\\2", first, perl = TRUE)
+    }
   }
 
   # Edge line colour --------------------------------------------------------
@@ -121,6 +217,7 @@ extract_svg_style <- function(doc) {
   }
 
   list(font_size_px    = font_size_px,
+       font_family     = font_family,
        edge_stroke     = edge_stroke,
        edge_sw_px      = edge_sw_px,
        cluster_fill    = cluster_fill,
@@ -176,9 +273,11 @@ parse_one_node <- function(g) {
   # CSS classes on the group — used for shape hints and class name
   classes <- strsplit(xml2::xml_attr(g, "class") %||% "", "\\s+")[[1]]
 
-  # Position from transform="translate(cx, cy)"
+  # Position from transform="translate(cx, cy)" on the node group, plus any
+  # cumulative translate from ancestor groups (e.g. the per-subgraph root groups
+  # that mermaid emits when a diagram has multiple layout roots).
   tf  <- xml2::xml_attr(g, "transform") %||% ""
-  pos <- parse_translate(tf)   # c(cx, cy)
+  pos <- parse_translate(tf) + ancestor_offset(g)
 
   # Find the primary shape element (first child that is a geometry element)
   shape_el <- find_shape_element(g)
@@ -234,6 +333,29 @@ parse_translate <- function(tf) {
   parts <- as.numeric(strsplit(trimws(inner), "[,\\s]+", perl = TRUE)[[1]])
   if (length(parts) < 2L) parts <- c(parts, 0)
   parts[1:2]
+}
+
+# Sum all translate() transforms on ancestors of `el` (excluding el itself).
+ancestor_offset <- function(el) {
+  off <- c(0, 0)
+  for (anc in xml2::xml_parents(el)) {
+    tf <- xml2::xml_attr(anc, "transform") %||% ""
+    if (nzchar(tf)) off <- off + parse_translate(tf)
+  }
+  off
+}
+
+# Shift all coordinates in an SVG path string by (dx, dy).
+# Assumes absolute (uppercase) commands using x,y pairs — M, L, C, S, Q, T —
+# which is what mermaid-cli/ELK produces for flowchart edges.
+offset_svg_path <- function(d, dx, dy) {
+  if (dx == 0 && dy == 0) return(d)
+  pattern <- "-?\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?"
+  m <- gregexpr(pattern, d, perl = TRUE)
+  nums <- as.numeric(regmatches(d, m)[[1]])
+  offsets <- rep(c(dx, dy), length.out = length(nums))
+  regmatches(d, m)[[1]] <- as.character(round(nums + offsets, 4))
+  d
 }
 
 find_shape_element <- function(g) {
@@ -577,6 +699,9 @@ extract_subgraphs <- function(doc, style) {
     w <- as.numeric(xml2::xml_attr(rect_el, "width") %||% "0")
     h <- as.numeric(xml2::xml_attr(rect_el, "height")%||% "0")
     if (w <= 0 || h <= 0) return(NULL)
+    anc_off <- ancestor_offset(g)
+    x <- x + anc_off[1]
+    y <- y + anc_off[2]
 
     fill   <- extract_fill(rect_el, g)   # NA → <a:noFill/> (transparent border-only cluster)
     stroke <- extract_stroke(rect_el, g)
@@ -705,6 +830,8 @@ parse_one_edge <- function(path_el, doc, nodes_tbl) {
   edge_id <- xml2::xml_attr(path_el, "id") %||% ""
   d       <- xml2::xml_attr(path_el, "d")  %||% ""
   if (!nzchar(d)) return(NULL)
+  anc_off <- ancestor_offset(path_el)
+  d       <- offset_svg_path(d, anc_off[1], anc_off[2])
 
   # Parse from/to — support both mermaid v11 underscore format (L_A_B_0_0)
   # and older hyphen format (L-A-B-0). Node IDs are assumed not to contain _.

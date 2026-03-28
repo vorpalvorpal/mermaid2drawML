@@ -28,7 +28,7 @@
 #' @export
 mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L, ...) {
   rendered <- render_mermaid(mermaid_code, timeout = timeout)
-  svg_data <- parse_mermaid_svg(rendered$svg, rendered$ast)
+  svg_data <- parse_mermaid_svg(rendered$svg, rendered$ast, source = mermaid_code)
   result   <- build_diagram_xml(svg_data,
                                 ast      = rendered$ast,
                                 start_id = as.integer(start_id),
