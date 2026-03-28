@@ -782,7 +782,7 @@ node_wsp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
     "<wps:wsp>",
       nv_xml,
       "<wps:spPr>",
-        "<a:xfrm", flip_attr, ">",
+        "<a:xfrm>",
           "<a:off x=\"", x_rel, "\" y=\"", y_rel, "\"/>",
           "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/>",
         "</a:xfrm>",
