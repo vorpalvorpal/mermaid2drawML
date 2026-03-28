@@ -1,0 +1,114 @@
+%%{init: {'flowchart': {'defaultRenderer': 'elk'}, 'elk': {'mergeEdges': true, 'nodePlacementStrategy': 'BRANDES_KOEPF'}}}%%
+flowchart LR
+    subgraph ENV["Environmental"]
+        Contractors(["Contractors"])
+        EnvSiteStaff(["Staff"])
+        WeatherDB[("Weather station database")]
+        EnvDB[("Environmental database")]
+        EnvChecklist@{ shape: docs, label: "Monthly/quarterly checklists"}
+        Contractors --> WeatherDB
+        EnvSiteStaff --> EnvDB
+        Contractors --> EnvDB
+        EnvSiteStaff --> EnvChecklist
+    end
+
+    subgraph GATE["Gatehouse"]
+        GateSiteStaff(["Weighbridge operators"])
+        TipsiteDB[("Tipsite database")]
+        GateSiteStaff --> TipsiteDB
+    end
+
+    subgraph OPS["Operational"]
+        OpsChecklist@{ shape: docs, label: "Weekly/Monthly checklists"}
+        DailyLog@{ shape: doc, label: "Daily Log"}
+        OpsSiteStaff(["Operators"])
+        OpsSiteStaff --> DailyLog
+        OpsSiteStaff --> OpsChecklist
+    end
+
+    subgraph MANG["Governance"]
+        AutoReports@{ shape: docs, label: "KPI Reports"}
+        Management(["Management"])
+        GRSG(["GRSG"])
+        ARIC(["ARIC"])
+        SOPs@{ shape: docs, label: "LEMP, SOPs"}
+        Management --> SOPs
+        Management --> GRSG
+        Management --> ARIC
+    end
+
+    subgraph AUD["Audit"]
+        Auditors(["Auditors"])
+        AuditReport@{ shape: doc, label: "Audit Report"}
+        Auditors --> AuditReport
+    end
+
+    subgraph REG["External"]
+        EPA(["EPA"])
+        SW(["Sydney Water"])
+        Council(["Council"])
+        Government(["Government"])
+        Regs@{ shape: docs, label: "Regulations, licences, consents, standards" }
+        Web@{ shape: win-pane, label: "Public website"}
+        Community(["Community"])
+        EnvDB --> Web
+        WeatherDB --> Web
+        Web --> Community
+        
+        Government --> Regs
+        EPA --> Regs
+        SW --> Regs
+        Council --> Regs
+    end
+
+    EnvDB --> EPA
+    EnvDB --> SW
+    TipsiteDB --> EPA
+    Regs --> SOPs
+
+    EnvChecklist --> AutoReports
+    EnvDB --> AutoReports
+    OpsChecklist --> AutoReports
+    DailyLog --> Auditors
+    OpsChecklist --> Auditors
+    DailyLog --> AutoReports
+    WeatherDB --> AutoReports
+    TipsiteDB --> AutoReports
+    AuditReport --> Management
+    AutoReports --> Management
+    EnvChecklist --> Auditors
+    AuditReport --> ARIC
+    SOPs --> OpsSiteStaff
+    SOPs --> Auditors
+    SOPs --> EnvSiteStaff
+    SOPs --> Contractors
+    SOPs --> GateSiteStaff
+
+    classDef green  fill:none,stroke:#5A8263,color:#5A8263
+    classDef red    fill:none,stroke:#700017,color:#700017
+    classDef purple fill:none,stroke:#9186BF,color:#9186BF
+    classDef orange fill:none,stroke:#cc6600,color:#cc6600
+    classDef blue   fill:none,stroke:#0066cc,color:#0066cc
+    classDef canyon fill:none,stroke:#5E504E,color:#5E504E
+
+    class Contractors,EnvSiteStaff,WeatherDB,EnvDB,EnvChecklist green
+    class OpsSiteStaff,OpsChecklist,DailyLog red
+    class GateSiteStaff,TipsiteDB purple
+    class Auditors,AuditReport orange
+    class Management,GRSG,ARIC,AutoReports,SOPs blue
+    class EPA,SW,Council,Government,Regs,Web,Community canyon
+
+    style ENV  fill:none,stroke:#5A8263,color:#5A8263,stroke-width:4px
+    style OPS  fill:none,stroke:#700017,color:#700017,stroke-width:4px
+    style GATE fill:none,stroke:#9186BF,color:#9186BF,stroke-width:4px
+    style AUD  fill:none,stroke:#cc6600,color:#cc6600,stroke-width:4px
+    style MANG fill:none,stroke:#0066cc,color:#0066cc,stroke-width:4px
+    style REG  fill:none,stroke:#5E504E,color:#5E504E,stroke-width:4px
+
+    linkStyle 0,1,2,3,11,12,18,19,22,23,28,32    stroke:#3d7a56,stroke-width:2px
+    linkStyle 5,6,24,25,26,27                     stroke:#8B3344,stroke-width:2px
+    linkStyle 4,20,29                             stroke:#7d7aa8,stroke-width:2px
+    linkStyle 10,30,33                            stroke:#a07040,stroke-width:2px
+    linkStyle 7,8,9,31,34,35,36,37,38            stroke:#4d80a8,stroke-width:2px
+    linkStyle 13,14,15,16,17,21                  stroke:#7a6a67,stroke-width:2px
+

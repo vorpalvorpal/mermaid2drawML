@@ -5,9 +5,15 @@
 #
 # Architecture: single <wp:anchor> containing a <wpg:wgp> super-group.
 #   - Subgraph groups are nested <wpg:grpSp> elements (emitted first = behind)
-#   - Diamond/hexagon/parallelogram nodes are <wpg:grpSp> groups containing
-#     a visual shape wsp + transparent text-overlay wsp
-#   - Regular nodes are plain <wps:wsp> children
+#   - stRect nodes use emit_st_rect_grpSp() (two stacked rect shapes)
+#   - Non-rectangular nodes (diamond, hexagon, parallelogram, trapezoid,
+#     extract, mergeTri, notchPent, collate, leanR, leanL) use
+#     emit_node_grpSp(), which creates a wpg:grpSp containing:
+#       1. node_visual_wsp() — the shape fill/stroke, no text body
+#       2. node_text_overlay_wsp() — transparent rect carrying the label,
+#          sized to the SVG foreignObject dimensions (fixes text clipping)
+#   - All other nodes (rect, roundRect, ellipse, cylinder, flowChart*,
+#     cloud, doc, docs, bolt, bang, brace*, text, etc.) use node_wsp()
 #   - Edges are <wps:wsp> children with custom geometry
 #
 # Key OOXML rules for nested groups (MS-ODRAWXML §2.16.1):
@@ -613,96 +619,8 @@ emit_node <- function(nd, origin_x_px, origin_y_px, ctx, ctr) {
   }
 }
 
-# wpg:grpSp for docs (stacked document pages):
-# Two foldedCorner shapes offset from each other; front shape carries the text label.
-emit_docs_grpSp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
-  grp_id <- ctr$next_id()
-
-  # Stacking offset: ~18% of the smaller dimension, minimum 45720 EMU (0.05 in)
-  off    <- max(as.integer(round(min(w_emu, h_emu) * 0.18)), 45720L)
-  pg_w   <- w_emu - off
-  pg_h   <- h_emu - off
-
-  # Back page: offset to upper-right, same style, no text
-  back_xml  <- docs_page_wsp(nd, off, 0L,  pg_w, pg_h, with_text = FALSE, ctx, ctr)
-  # Front page: lower-left, with text label
-  front_xml <- docs_page_wsp(nd, 0L, off,  pg_w, pg_h, with_text = TRUE,  ctx, ctr)
-
-  make_nested_grpSp(grp_id,
-                    paste0("mermaid:node:", nd$id %||% ""),
-                    x_rel, y_rel, w_emu, h_emu,
-                    paste0(back_xml, front_xml))
-}
-
-docs_page_wsp <- function(nd, x_pg, y_pg, pg_w, pg_h, with_text, ctx, ctr) {
-  shape_id   <- ctr$next_id()
-  fill_hex   <- nd$fill   %||% NA_character_
-  stroke_hex <- nd$stroke %||% NA_character_
-
-  # Both pages are always solid (never transparent) so that the front document
-  # visually blocks the overlapping portion of the back document:
-  #   back page  — always white (paper/substrate colour)
-  #   front page — node fill colour, or white if the node has no fill
-  fill_xml <- if (!with_text) {
-    "<a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill>"
-  } else {
-    if (is.na(fill_hex))
-      "<a:solidFill><a:srgbClr val=\"FFFFFF\"/></a:solidFill>"
-    else
-      paste0("<a:solidFill><a:srgbClr val=\"", fill_hex, "\"/></a:solidFill>")
-  }
-
-  sw_emu     <- max(as.integer(ctx$sw_pt * 12700 * ctx$scale / 9525), 1588L)
-  stroke_val <- if (!is.na(stroke_hex)) stroke_hex else ctx$default_stroke
-  stroke_xml <- paste0(
-    "<a:ln w=\"", sw_emu, "\">",
-    "<a:solidFill><a:srgbClr val=\"", stroke_val, "\"/></a:solidFill>",
-    "</a:ln>"
-  )
-
-  nv_xml <- make_nvSpPr(shape_id,
-                        paste0("mermaid:", if (with_text) "node" else "back", ":",
-                               nd$id %||% ""),
-                        "{}")
-  xfrm_xml <- paste0(
-    "<a:xfrm>",
-      "<a:off x=\"", x_pg, "\" y=\"", y_pg, "\"/>",
-      "<a:ext cx=\"", pg_w, "\" cy=\"", pg_h, "\"/>",
-    "</a:xfrm>"
-  )
-  geom_xml <- "<a:prstGeom prst=\"foldedCorner\"><a:avLst/></a:prstGeom>"
-
-  if (!with_text) {
-    paste0(
-      "<wps:wsp>", nv_xml,
-        "<wps:spPr>", xfrm_xml, geom_xml, fill_xml, stroke_xml, "</wps:spPr>",
-        "<wps:bodyPr><a:noAutofit/></wps:bodyPr>",
-      "</wps:wsp>"
-    )
-  } else {
-    is_transparent <- is.na(fill_hex)
-    label    <- xml_escape(strip_html(nd$label %||% nd$id %||% ""))
-    text_col <- node_text_colour(nd, is_transparent, fill_hex, ctx$dtc)
-        paste0(
-      "<wps:wsp>", nv_xml,
-        "<wps:spPr>", xfrm_xml, geom_xml, fill_xml, stroke_xml, "</wps:spPr>",
-        "<wps:txbx><w:txbxContent><w:p>",
-          "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-          "<w:r>", text_rpr_xml(text_col, ctx),
-            "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
-        "</w:p></w:txbxContent></wps:txbx>",
-        "<wps:bodyPr anchor=\"ctr\" ",
-          "lIns=\"0\" rIns=\"0\" ",
-          "tIns=\"0\" bIns=\"0\">",
-          "<a:normAutofit/></wps:bodyPr>",
-      "</wps:wsp>"
-    )
-  }
-}
-
 # wpg:grpSp for st-rect (Multi-Process): two stacked rect shapes in a group.
 # Back page is white; front page carries the fill colour and text label.
-# Modelled on emit_docs_grpSp / docs_page_wsp but uses rect preset geometry.
 emit_st_rect_grpSp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
   grp_id <- ctr$next_id()
 
@@ -844,9 +762,6 @@ node_wsp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
 
   prst       <- .shape_map[shape_name]
   if (is.na(prst)) prst <- "rect"
-
-  # leanL (lean-l) is the parallelogram preset mirrored horizontally
-  flip_attr <- if (identical(shape_name, "leanL")) " flipH=\"1\"" else ""
 
   geom_xml <- paste0("<a:prstGeom prst=\"", prst, "\"><a:avLst/></a:prstGeom>")
   label    <- xml_escape(strip_html(nd$label %||% nd$id %||% ""))

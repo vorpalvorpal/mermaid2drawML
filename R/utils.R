@@ -4,7 +4,6 @@
 # EMU conversion ---------------------------------------------------------------
 
 inches_to_emu <- function(x) as.integer(round(x * 914400))
-emu_to_inches <- function(x) x / 914400
 
 # XML helpers ------------------------------------------------------------------
 

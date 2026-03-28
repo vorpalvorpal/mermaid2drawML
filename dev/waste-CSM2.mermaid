@@ -1,0 +1,126 @@
+%%{init: {
+  'theme': 'base',
+  'flowchart': {
+    'htmlLabels': false,
+    'defaultRenderer': 'elk'
+  },
+  'themeVariables': {
+    'background': '#FFFFFF',
+    'lineColor': '#5E504E',
+    'clusterBkg': 'transparent',
+    'edgeLabelBackground': '#FFFFFF',
+    'primaryTextColor': '#5E504E',
+    'fontFamily': 'Myriad Pro',
+    'fontSize': '20px'
+  }
+}}%%
+flowchart TD
+    subgraph space01[ ]
+        subgraph Domestic_Commercial["Domestic/Commercial"]
+            subgraph space2[ ]
+                subgraph Gatehouse
+                    subgraph space2.1[ ]
+                        B2{{Initial Screening}}:::Mountains
+                    end
+                end
+                
+                B2 -->|Rejected| C2[\Exit site/]:::Mountains
+                B2 -->|Accepted| E2{{Secondary Screening}}:::Mountains
+                E2 -->|Rejected| C2
+                F2 --> C2
+                
+                subgraph SVA[Small Vehicle Area]
+                    subgraph space2.2[ ]
+                        E2 -->|Light vehicles| F1[Small Vehicle Area Bins]:::Mountains
+                        E2 -->|Reusable| F2[Reuse Shed]:::Mountains
+                    end
+                end
+            end
+        end
+    end
+
+    subgraph Municipal
+        subgraph space1[ ]
+            AA1[Resident sorting]:::Canyon --> A1
+            A1[Kerbside Collection]:::Canyon --> B1{{Collection Screening}}:::Canyon
+            B1 -->|Rejected| C1[\Not collected/]:::Canyon
+        end
+    end
+    
+    subgraph space02[ ]
+        subgraph Resource_Recovery["Resource&#160;Recovery"]
+            subgraph space3[ ]
+                E2 ---->|Heavy vehicles| F3[Stockpiles]:::Bush
+                F1 --> F3
+                F3 --> G2{{Tertiary Screening}}:::Bush
+                G2 -->|Recoverable| H2[\Transport Off Site/]:::Bush
+            end
+        end
+    end
+
+    subgraph Landfill
+        subgraph space4[ ]
+            B1 ----> J1[Active Cell]:::Earth
+            F1 ----> J1
+            G2 -->|Residual| J1
+            E2 ---->|Special Waste| J1
+            L1[Cover]:::Earth --> J1
+            M1@{shape: text, label: Compaction} --o J1
+        end
+    end
+
+    class Municipal subCanyon;
+    class Domestic_Commercial subMountains;
+    class Resource_Recovery subBush;
+    class Landfill subEarth;
+    class Gatehouse,SVA subSub;
+    class space01,space02,space1,space2,space2.1,space2.2,space3,space4 subSpace;
+
+classDef Rosella40 fill:#FFFFFFAA,stroke:#FCA789,stroke-width:2px,color:#FCA789,font-size:20px;
+classDef Rosella70 fill:#FFFFFFAA,stroke:#FC5A3C,stroke-width:2px,color:#FC5A3C,font-size:20px;
+classDef Rosella fill:#FFFFFFAA,stroke:#FF0000,stroke-width:2px,color:#FF0000,font-size:20px;
+classDef Earth fill:#FFFFFFAA,stroke:#700017,stroke-width:2px,color:#700017,font-size:20px;
+classDef Bush40 fill:#FFFFFFAA,stroke:#A3C380,stroke-width:2px,color:#A3C380,font-size:20px;
+classDef Bush80 fill:#FFFFFFAA,stroke:#5E8933,stroke-width:2px,color:#5E8933,font-size:20px;
+classDef Bush fill:#FFFFFFAA,stroke:#507811,stroke-width:2px,color:#507811,font-size:20px;
+classDef Fern fill:#FFFFFFAA,stroke:#6EBD33,stroke-width:2px,color:#6EBD33,font-size:20px;
+classDef Canyon fill:#FFFFFFAA,stroke:#006A5C,stroke-width:2px,color:#006A5C,font-size:20px;
+classDef Gum fill:#FFFFFFAA,stroke:#5A8263,stroke-width:2px,color:#5A8263,font-size:20px;
+classDef Gum60 fill:#FFFFFFAA,stroke:#8EAA91,stroke-width:2px,color:#8EAA91,font-size:20px;
+classDef Mist50 fill:#FFFFFFAA,stroke:#B3C7E0,stroke-width:2px,color:#B3C7E0,font-size:20px;
+classDef Mist fill:#FFFFFFAA,stroke:#6095C1,stroke-width:2px,color:#6095C1,font-size:20px;
+classDef Mountains70 fill:#FFFFFFAA,stroke:#5279A9,stroke-width:2px,color:#5279A9,font-size:20px;
+classDef Mountains fill:#FFFFFFAA,stroke:#005490,stroke-width:2px,color:#005490,font-size:20px;
+classDef Winter fill:#FFFFFFAA,stroke:#021D49,stroke-width:2px,color:#021D49,font-size:20px;
+classDef Rhododendron fill:#FFFFFFAA,stroke:#9186BF,stroke-width:2px,color:#9186BF,font-size:20px;
+classDef WildFlower fill:#FFFFFFAA,stroke:#FF671D,stroke-width:2px,color:#FF671D,font-size:20px;
+classDef Wattle fill:#FFFFFFAA,stroke:#FFB71B,stroke-width:2px,color:#FFB71B,font-size:20px;
+classDef Escarpment50 fill:#FFFFFFAA,stroke:#FEE6AA,stroke-width:2px,color:#FEE6AA,font-size:20px;
+classDef Escarpment fill:#FFFFFFAA,stroke:#FED95E,stroke-width:2px,color:#FED95E,font-size:20px;
+classDef Bark fill:#FFFFFFAA,stroke:#5E504E,stroke-width:2px,color:#5E504E,font-size:20px;
+
+classDef subRosella40 fill:transparent,stroke:#FCA789,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subRosella70 fill:transparent,stroke:#FC5A3C,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subRosella fill:transparent,stroke:#FF0000,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subEarth fill:transparent,stroke:#700017,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subBush40 fill:transparent,stroke:#A3C380,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subBush80 fill:transparent,stroke:#5E8933,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subBush fill:transparent,stroke:#507811,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subFern fill:transparent,stroke:#6EBD33,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subCanyon fill:transparent,stroke:#006A5C,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subGum fill:transparent,stroke:#5A8263,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subGum60 fill:transparent,stroke:#8EAA91,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subMist50 fill:transparent,stroke:#B3C7E0,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subMist fill:transparent,stroke:#6095C1,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subMountains70 fill:transparent,stroke:#5279A9,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subMountains fill:transparent,stroke:#005490,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subWinter fill:transparent,stroke:#021D49,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subRhododendron fill:transparent,stroke:#9186BF,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subWildFlower fill:transparent,stroke:#FF671D,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subWattle fill:transparent,stroke:#FFB71B,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subEscarpment50 fill:transparent,stroke:#FEE6AA,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subEscarpment fill:transparent,stroke:#FED95E,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subBark fill:transparent,stroke:#5E504E,stroke-width:2px,color:#5E504E,font-size:26px;
+classDef subSub fill:transparent,stroke:#5E504E44,stroke-width:2px,color:#5E504E88,font-size:20px;
+classDef subSpace fill:transparent,stroke:transparent,stroke-width:0px,color:transparent,font-size:20px,stroke-dasharray: 0 1;
+
