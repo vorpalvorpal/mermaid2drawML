@@ -139,9 +139,21 @@ extract_svg_style <- function(doc) {
   }
 
   # Font family -------------------------------------------------------------
-  # Mermaid emits e.g. font-family:"trebuchet ms",verdana,arial,sans-serif
-  # Extract the first (primary) font name and normalise to its proper display
-  # name so Word uses the same font that mermaid/Chromium measured the text in.
+  # Mermaid uses TWO font declarations that serve different purposes:
+  #
+  #   1. font-family: <value>  on #my-svg and .label — set by themeVariables
+  #      fontFamily (e.g. "Myriad Pro").  Applies to <text> elements such as
+  #      subgraph labels, but NOT to <foreignObject> node-label content.
+  #
+  #   2. --mermaid-font-family: "trebuchet ms",verdana,...  set via :root{} —
+  #      a CSS custom property that mermaid's internal CSS uses for the actual
+  #      <foreignObject> text (node labels).  This is always the mermaid
+  #      built-in stack and is NOT affected by themeVariables.fontFamily.
+  #
+  # Node sizes (foreignObject dimensions) are therefore measured using the
+  # --mermaid-font-family stack, NOT the declared font-family.  We extract
+  # BOTH so callers can present the correct measurement font to Word (avoiding
+  # metric mismatches) while still exposing the user's declared font if needed.
   .font_name_map <- c(
     "trebuchet ms"   = "Trebuchet MS",
     "verdana"        = "Verdana",
@@ -156,20 +168,42 @@ extract_svg_style <- function(doc) {
     "calibri"        = "Calibri",
     "segoe ui"       = "Segoe UI"
   )
-  font_family <- "Trebuchet MS"   # mermaid's compiled-in default
+
+  .first_font <- function(raw) {
+    first <- trimws(strsplit(raw, ",")[[1]][1])
+    first <- tolower(gsub('"', '', first, fixed = TRUE))
+    first <- trimws(first)
+    if (!nzchar(first) || first %in% c("sans-serif","serif","monospace","inherit"))
+      return(NA_character_)
+    if (first %in% names(.font_name_map)) return(.font_name_map[[first]])
+    # Title-case unknown font names (e.g. "open sans" -> "Open Sans")
+    gsub("(^|\\s)(\\S)", "\\1\\U\\2", first, perl = TRUE)
+  }
+
+  # 1. Declared font (themeVariables.fontFamily) — from font-family: <value>
+  declared_font_family <- "Trebuchet MS"
   m <- regexec('font-family\\s*:\\s*([^;}\\n]+)', style_text, perl = TRUE)
   hit <- regmatches(style_text, m)[[1]]
   if (length(hit) == 2L) {
-    # hit[1] = full match, hit[2] = captured value e.g. '"trebuchet ms",verdana,...'
-    first <- trimws(strsplit(hit[2], ",")[[1]][1])
-    first <- tolower(gsub('"', '', first, fixed = TRUE))
-    if (first %in% names(.font_name_map)) {
-      font_family <- .font_name_map[[first]]
-    } else if (nzchar(first) && !first %in% c("sans-serif","serif","monospace")) {
-      # Title-case unknown font names (e.g. "open sans" -> "Open Sans")
-      font_family <- gsub("(^|\\s)(\\S)", "\\1\\U\\2", first, perl = TRUE)
-    }
+    f <- .first_font(hit[2])
+    if (!is.na(f)) declared_font_family <- f
   }
+
+  # 2. Measurement font (--mermaid-font-family CSS variable) — always Trebuchet MS
+  #    unless mermaid changes its built-in default.  This is the font that
+  #    Chromium actually used to measure node label widths.
+  measurement_font_family <- "Trebuchet MS"
+  m2 <- regexec('--mermaid-font-family\\s*:\\s*([^;}\\n]+)',
+                style_text, perl = TRUE)
+  hit2 <- regmatches(style_text, m2)[[1]]
+  if (length(hit2) == 2L) {
+    f <- .first_font(hit2[2])
+    if (!is.na(f)) measurement_font_family <- f
+  }
+
+  # font_family is the measurement font: this is what should go in <w:rFonts>
+  # to ensure Word text fits the SVG-measured node boxes without clipping.
+  font_family <- measurement_font_family
 
   # Edge line colour --------------------------------------------------------
   # Mermaid emits:  .flowchart-link { stroke: #RRGGBB; fill: none; }
@@ -216,12 +250,13 @@ extract_svg_style <- function(doc) {
     }
   }
 
-  list(font_size_px    = font_size_px,
-       font_family     = font_family,
-       edge_stroke     = edge_stroke,
-       edge_sw_px      = edge_sw_px,
-       cluster_fill    = cluster_fill,
-       cluster_stroke  = cluster_stroke)
+  list(font_size_px          = font_size_px,
+       font_family            = font_family,           # measurement font (--mermaid-font-family)
+       declared_font_family   = declared_font_family,  # themeVariables fontFamily
+       edge_stroke            = edge_stroke,
+       edge_sw_px             = edge_sw_px,
+       cluster_fill           = cluster_fill,
+       cluster_stroke         = cluster_stroke)
 }
 
 # ── Node extraction ────────────────────────────────────────────────────────

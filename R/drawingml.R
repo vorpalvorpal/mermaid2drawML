@@ -132,12 +132,15 @@ new_id_counter <- function(start = 1L) {
 #' @param default_text_color Default text colour. Default "000000".
 #' @param stroke_width_pt Stroke width in points. Default 1.5.
 #' @param font_scale Numeric multiplier applied to the computed font size before
-#'   writing `<w:sz>`. Default `1.0`. Use values < 1 (e.g. `0.85`) to reduce
-#'   the Word font when the declared `fontFamily` in the mermaid `%%{init}%%`
-#'   block is not available in the Chromium rendering environment (so node sizes
-#'   were measured in a narrower fallback font such as Trebuchet MS) but IS
-#'   available in Word (e.g. Myriad Pro). A factor of ~0.85 typically
-#'   compensates for Myriad Pro being ~15-20% wider than Trebuchet MS.
+#'   writing `<w:sz>`. Default `1.0`. Rarely needed now that the measurement
+#'   font is correctly detected. Use values < 1 (e.g. `0.85`) only if you set
+#'   `word_font_family` to a font wider than Trebuchet MS (the mermaid default).
+#' @param word_font_family Character. Font name for Word text runs (`<w:rFonts>`).
+#'   Default `NULL`, which uses the measurement font detected from the SVG CSS
+#'   `--mermaid-font-family` variable (typically `"Trebuchet MS"`). Override
+#'   with e.g. `"Myriad Pro"` if you want a different display font in Word;
+#'   combine with `font_scale < 1.0` if the override font is wider than the
+#'   measurement font to avoid text overflowing node boxes.
 #' @return Named list: xml (character) and next_id (integer).
 #' @export
 build_diagram_xml <- function(svg_data,
@@ -150,7 +153,8 @@ build_diagram_xml <- function(svg_data,
                                default_stroke     = "5E504E",
                                default_text_color = "000000",
                                stroke_width_pt    = 1.5,
-                               font_scale         = 1.0) {
+                               font_scale         = 1.0,
+                               word_font_family   = NULL) {
 
   nodes  <- svg_data$nodes
   edges  <- svg_data$edges
@@ -189,10 +193,13 @@ build_diagram_xml <- function(svg_data,
   )
   font_size_hp <- max(as.integer(round(font_size_hp * font_scale)), 10L)
 
-  # Font family: declared by mermaid in the SVG CSS.  Note that this is the
-  # *declared* family — Chromium may have fallen back to a different font if
-  # the declared family was unavailable (see font_scale note above).
-  font_family <- sty$font_family %||% "Trebuchet MS"
+  # Font family for Word <w:rFonts>: use word_font_family if explicitly supplied,
+  # otherwise use the measurement font from the SVG (--mermaid-font-family,
+  # typically Trebuchet MS).  This is distinct from sty$declared_font_family
+  # (the themeVariables fontFamily, e.g. "Myriad Pro"), which applies to the
+  # outer SVG but NOT to foreignObject node labels — those are measured in
+  # sty$font_family (the --mermaid-font-family stack, e.g. Trebuchet MS).
+  font_family <- word_font_family %||% sty$font_family %||% "Trebuchet MS"
 
   # Edge stroke: colour from SVG stylesheet; width scaled from SVG px, min 0.75pt.
   # Word renders sub-0.5pt lines as hairlines; 0.75pt keeps edges clearly visible.
