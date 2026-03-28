@@ -122,25 +122,35 @@ new_id_counter <- function(start = 1L) {
 #' @param svg_data List from [parse_mermaid_svg()]: nodes, edges, viewbox.
 #' @param ast Reserved for future use.
 #' @param start_id Integer. First shape ID; increment between diagrams.
-#' @param page_width_in Numeric. Usable content width in inches (default 6.0).
-#' @param page_height_in Numeric. Max diagram height in inches (default 8.0).
+#' @param page_width_in Numeric. Usable content width in inches (default 6.27,
+#'   A4 portrait with 1" margins).
+#' @param page_height_in Numeric. Max diagram height in inches (default 9.69,
+#'   A4 portrait with 1" margins).
 #' @param margin_in Numeric. Left/top margin offset in inches (default 1.0).
 #' @param default_fill Default node fill colour (6-char hex). Default "FFFFFF".
 #' @param default_stroke Default stroke colour. Default "5E504E".
 #' @param default_text_color Default text colour. Default "000000".
 #' @param stroke_width_pt Stroke width in points. Default 1.5.
+#' @param font_scale Numeric multiplier applied to the computed font size before
+#'   writing `<w:sz>`. Default `1.0`. Use values < 1 (e.g. `0.85`) to reduce
+#'   the Word font when the declared `fontFamily` in the mermaid `%%{init}%%`
+#'   block is not available in the Chromium rendering environment (so node sizes
+#'   were measured in a narrower fallback font such as Trebuchet MS) but IS
+#'   available in Word (e.g. Myriad Pro). A factor of ~0.85 typically
+#'   compensates for Myriad Pro being ~15-20% wider than Trebuchet MS.
 #' @return Named list: xml (character) and next_id (integer).
 #' @export
 build_diagram_xml <- function(svg_data,
                                ast                = NULL,
                                start_id           = 1L,
-                               page_width_in      = 6.0,
-                               page_height_in     = 8.0,
+                               page_width_in      = 6.27,
+                               page_height_in     = 9.69,
                                margin_in          = 1.0,
                                default_fill       = "FFFFFF",
                                default_stroke     = "5E504E",
                                default_text_color = "000000",
-                               stroke_width_pt    = 1.5) {
+                               stroke_width_pt    = 1.5,
+                               font_scale         = 1.0) {
 
   nodes  <- svg_data$nodes
   edges  <- svg_data$edges
@@ -157,16 +167,31 @@ build_diagram_xml <- function(svg_data,
   # direct CSS-px-to-half-points conversion (px × 1.5, i.e. px × 72/96 × 2).
   # The proportional formula keeps text the same relative size as the SVG but
   # can produce unreadably small results for complex wide diagrams. The CSS
-  # floor ensures the Word font is never smaller than the physically-equivalent
-  # point size of the mermaid fontSize setting (e.g. 20px → min 15pt).
+  # floor ensures Word never uses a font smaller than the mermaid fontSize
+  # setting's physical equivalent (e.g. 10px CSS → 15hp = 7.5pt).
+  # The absolute floor (14hp = 7pt) prevents sub-6pt text on very wide/complex
+  # diagrams where the proportional value would be tiny.
+  #
+  # IMPORTANT — font metric mismatch: if the `fontFamily` in the mermaid
+  # %%{init}%% block (e.g. "Myriad Pro") is NOT available in the Chromium /
+  # Puppeteer environment used by mermaid-cli, Chromium falls back to a
+  # narrower font (typically Trebuchet MS or the system default sans-serif).
+  # The SVG foreignObject dimensions are then sized for the narrower font.
+  # When Word renders the same diagram using the declared font (e.g. Myriad Pro,
+  # which IS installed on the user's system), the wider character metrics cause
+  # text to overflow those tight boxes.  Use `font_scale < 1.0` to compensate:
+  # a value of ~0.85 works well when Myriad Pro is the Word font but Trebuchet
+  # MS was the effective measurement font in Chromium.
   font_size_hp <- max(
     as.integer(round(sty$font_size_px * scale / 6350)),  # proportional
     as.integer(round(sty$font_size_px * 1.5)),            # CSS px -> half-pts
-    16L                                                    # absolute floor 8pt
+    14L                                                    # absolute floor 7pt
   )
+  font_size_hp <- max(as.integer(round(font_size_hp * font_scale)), 10L)
 
-  # Font family: use whatever mermaid/Chromium measured the text in, so that
-  # Word's text renderer uses the same metrics and text fits the same boxes.
+  # Font family: declared by mermaid in the SVG CSS.  Note that this is the
+  # *declared* family — Chromium may have fallen back to a different font if
+  # the declared family was unavailable (see font_scale note above).
   font_family <- sty$font_family %||% "Trebuchet MS"
 
   # Edge stroke: colour from SVG stylesheet; width scaled from SVG px, min 0.75pt.

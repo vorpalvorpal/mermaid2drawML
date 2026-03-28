@@ -70,13 +70,17 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
   }
   resolved_orientation <- if (use_landscape) "landscape" else "portrait"
 
+  # A4 physical dimensions in inches (210 mm × 297 mm)
+  a4_short <- 8.27
+  a4_long  <- 11.69
+
   # Build extra_args for build_diagram_xml, respecting explicit overrides in ...
   extra_args <- list(...)
 
   if (!is.null(margins)) {
-    # Compute content area from physical page size minus margins (US Letter)
-    phys_w <- if (use_landscape) 11.0 else 8.5
-    phys_h <- if (use_landscape) 8.5  else 11.0
+    # Compute content area from A4 physical page size minus supplied margins
+    phys_w <- if (use_landscape) a4_long  else a4_short
+    phys_h <- if (use_landscape) a4_short else a4_long
     if (is.null(extra_args$page_width_in))
       extra_args$page_width_in  <- phys_w - margins$left - margins$right
     if (is.null(extra_args$page_height_in))
@@ -84,13 +88,13 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
     if (is.null(extra_args$margin_in))
       extra_args$margin_in      <- margins$left
   } else {
-    # Built-in defaults
+    # Built-in defaults: A4 with 1" margins each side
     if (use_landscape) {
-      if (is.null(extra_args$page_width_in))  extra_args$page_width_in  <- 9.0
-      if (is.null(extra_args$page_height_in)) extra_args$page_height_in <- 6.0
+      if (is.null(extra_args$page_width_in))  extra_args$page_width_in  <- a4_long  - 2  # 9.69"
+      if (is.null(extra_args$page_height_in)) extra_args$page_height_in <- a4_short - 2  # 6.27"
     } else {
-      if (is.null(extra_args$page_width_in))  extra_args$page_width_in  <- 6.0
-      if (is.null(extra_args$page_height_in)) extra_args$page_height_in <- 8.0
+      if (is.null(extra_args$page_width_in))  extra_args$page_width_in  <- a4_short - 2  # 6.27"
+      if (is.null(extra_args$page_height_in)) extra_args$page_height_in <- a4_long  - 2  # 9.69"
     }
   }
 
@@ -165,9 +169,10 @@ body_add_mermaid <- function(doc, mermaid_code, start_id = 1L,
   needs_section <- diagram$orientation == "landscape" || !is.null(diagram$margins)
 
   if (needs_section) {
-    orient <- diagram$orientation
-    phys_w <- if (orient == "landscape") 11.0 else 8.5
-    phys_h <- if (orient == "landscape") 8.5  else 11.0
+    orient   <- diagram$orientation
+    # A4 physical dimensions: 210 mm × 297 mm = 8.27" × 11.69"
+    phys_w <- if (orient == "landscape") 11.69 else 8.27
+    phys_h <- if (orient == "landscape") 8.27  else 11.69
 
     ps_args <- list(
       page_size = officer::page_size(
