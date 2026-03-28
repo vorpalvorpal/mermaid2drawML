@@ -153,8 +153,17 @@ build_diagram_xml <- function(svg_data,
   off_x  <- inches_to_emu(margin_in)
   off_y  <- inches_to_emu(margin_in)
 
-  # Scale font size proportionally; floor at 8 half-pts (4pt).
-  font_size_hp <- max(as.integer(round(sty$font_size_px * scale / 6350)), 8L)
+  # Font size: take the larger of the proportionally-scaled value and the
+  # direct CSS-px-to-half-points conversion (px × 1.5, i.e. px × 72/96 × 2).
+  # The proportional formula keeps text the same relative size as the SVG but
+  # can produce unreadably small results for complex wide diagrams. The CSS
+  # floor ensures the Word font is never smaller than the physically-equivalent
+  # point size of the mermaid fontSize setting (e.g. 20px → min 15pt).
+  font_size_hp <- max(
+    as.integer(round(sty$font_size_px * scale / 6350)),  # proportional
+    as.integer(round(sty$font_size_px * 1.5)),            # CSS px -> half-pts
+    16L                                                    # absolute floor 8pt
+  )
 
   # Font family: use whatever mermaid/Chromium measured the text in, so that
   # Word's text renderer uses the same metrics and text fits the same boxes.

@@ -1,4 +1,11 @@
-%%{init: {'flowchart': {'defaultRenderer': 'elk'}, 'elk': {'mergeEdges': true, 'nodePlacementStrategy': 'BRANDES_KOEPF'}}}%%
+%%{init: {
+  'flowchart': {'defaultRenderer': 'elk'},
+  'elk': {'mergeEdges': true, 'nodePlacementStrategy': 'BRANDES_KOEPF'},
+  'themeVariables': {
+    'fontFamily': 'Myriad Pro',
+    'fontSize': '20px'
+  }
+}}%%
 flowchart LR
     subgraph ENV["Environmental"]
         Contractors(["Contractors"])
