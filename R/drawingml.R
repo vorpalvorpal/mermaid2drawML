@@ -107,6 +107,29 @@ text_rpr_xml <- function(text_col, ctx) {
   )
 }
 
+# Build <w:txbxContent> XML for a label that may contain <br> line breaks.
+# Splits on <br>, <br/>, <br />, or \n before stripping HTML so that each
+# logical line becomes its own <w:p> inside the text box.
+label_txbx_xml <- function(raw_label, text_col, jc = "center", ctx) {
+  segs <- strsplit(raw_label %||% "", "<br\\s*/?>|\\n", perl = TRUE)[[1]]
+  segs <- vapply(segs, function(s) xml_escape(strip_html(s)), character(1L),
+                 USE.NAMES = FALSE)
+  # Drop trailing blank segments only (keep intentional interior blanks)
+  while (length(segs) > 1L && !nzchar(segs[length(segs)])) segs <- segs[-length(segs)]
+  if (length(segs) == 0L) segs <- ""
+
+  rpr <- text_rpr_xml(text_col, ctx)
+  ppr <- if (!is.null(jc) && nzchar(jc))
+    paste0("<w:pPr><w:jc w:val=\"", jc, "\"/></w:pPr>") else ""
+
+  paras <- vapply(segs, function(seg) {
+    paste0("<w:p>", ppr, "<w:r>", rpr,
+           "<w:t xml:space=\"preserve\">", seg, "</w:t></w:r></w:p>")
+  }, character(1L), USE.NAMES = FALSE)
+
+  paste0("<w:txbxContent>", paste0(paras, collapse = ""), "</w:txbxContent>")
+}
+
 new_id_counter <- function(start = 1L) {
   n <- as.integer(start)
   list(
@@ -583,7 +606,6 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
     "</a:ln>"
   )
 
-  label    <- xml_escape(strip_html(sg$label %||% ""))
   # Use the subgraph's own colour for its label (from SVG `color:` property or stroke)
   text_col <- sg$color %||% NA_character_
   if (is.na(text_col)) text_col <- if (!is.na(fill_hex) && is_dark(fill_hex)) "FFFFFF" else ctx$dtc
@@ -609,11 +631,7 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
         "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>",
         fill_xml, stroke_xml,
       "</wps:spPr>",
-      "<wps:txbx><w:txbxContent><w:p>",
-        "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-        "<w:r>", text_rpr_xml(text_col, ctx),
-          "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
-      "</w:p></w:txbxContent></wps:txbx>",
+      "<wps:txbx>", label_txbx_xml(sg$label %||% "", text_col, "center", ctx), "</wps:txbx>",
       "<wps:bodyPr anchor=\"t\" ",
         "lIns=\"0\" rIns=\"0\" ",
         "tIns=\"0\" bIns=\"0\">",
@@ -726,16 +744,11 @@ st_rect_page_wsp <- function(nd, x_pg, y_pg, pg_w, pg_h, with_text, ctx, ctr) {
     )
   } else {
     is_transparent <- is.na(fill_hex)
-    label    <- xml_escape(strip_html(nd$label %||% nd$id %||% ""))
     text_col <- node_text_colour(nd, is_transparent, fill_hex, ctx$dtc)
         paste0(
       "<wps:wsp>", nv_xml,
         "<wps:spPr>", xfrm_xml, geom_xml, fill_xml, stroke_xml, "</wps:spPr>",
-        "<wps:txbx><w:txbxContent><w:p>",
-          "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-          "<w:r>", text_rpr_xml(text_col, ctx),
-            "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
-        "</w:p></w:txbxContent></wps:txbx>",
+        "<wps:txbx>", label_txbx_xml(nd$label %||% nd$id %||% "", text_col, "center", ctx), "</wps:txbx>",
         "<wps:bodyPr anchor=\"ctr\" ",
           "lIns=\"0\" rIns=\"0\" ",
           "tIns=\"0\" bIns=\"0\">",
@@ -805,7 +818,6 @@ node_wsp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
   if (is.na(prst)) prst <- "rect"
 
   geom_xml <- paste0("<a:prstGeom prst=\"", prst, "\"><a:avLst/></a:prstGeom>")
-  label    <- xml_escape(strip_html(nd$label %||% nd$id %||% ""))
   text_col <- node_text_colour(nd, is_transparent, fill_hex, ctx$dtc)
 
 
@@ -829,11 +841,7 @@ node_wsp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
         "</a:xfrm>",
         geom_xml, fill_xml, stroke_xml,
       "</wps:spPr>",
-      "<wps:txbx><w:txbxContent><w:p>",
-        "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-        "<w:r>", text_rpr_xml(text_col, ctx),
-          "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
-      "</w:p></w:txbxContent></wps:txbx>",
+      "<wps:txbx>", label_txbx_xml(nd$label %||% nd$id %||% "", text_col, "center", ctx), "</wps:txbx>",
       "<wps:bodyPr anchor=\"ctr\" ",
         "lIns=\"0\" rIns=\"0\" ",
         "tIns=\"0\" bIns=\"0\">",
@@ -904,7 +912,6 @@ node_text_overlay_wsp <- function(nd, tx_rel, ty_rel, tw_emu, th_emu, ctx, ctr) 
   shape_id       <- ctr$next_id()
   fill_hex       <- nd$fill %||% NA_character_
   is_transparent <- is.na(fill_hex)
-  label          <- xml_escape(strip_html(nd$label %||% nd$id %||% ""))
   text_col       <- node_text_colour(nd, is_transparent, fill_hex, ctx$dtc)
 
   nv_xml <- make_nvSpPr(shape_id,
@@ -923,11 +930,7 @@ node_text_overlay_wsp <- function(nd, tx_rel, ty_rel, tw_emu, th_emu, ctx, ctr) 
         "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>",
         "<a:noFill/><a:ln w=\"0\"><a:noFill/></a:ln>",
       "</wps:spPr>",
-      "<wps:txbx><w:txbxContent><w:p>",
-        "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-        "<w:r>", text_rpr_xml(text_col, ctx),
-          "<w:t xml:space=\"preserve\">", label, "</w:t></w:r>",
-      "</w:p></w:txbxContent></wps:txbx>",
+      "<wps:txbx>", label_txbx_xml(nd$label %||% nd$id %||% "", text_col, "center", ctx), "</wps:txbx>",
       "<wps:bodyPr anchor=\"ctr\" lIns=\"0\" rIns=\"0\" tIns=\"0\" bIns=\"0\">",
         "<a:normAutofit/></wps:bodyPr>",
     "</wps:wsp>"
@@ -1004,7 +1007,6 @@ emit_edge_label <- function(e, origin_x_px, origin_y_px, ctx, ctr) {
   if (is.na(lx) || is.na(ly)) return("")
 
   shape_id <- ctr$next_id()
-  lbl      <- xml_escape(strip_html(e$label %||% ""))
   w_emu    <- inches_to_emu(1.2)
   h_emu    <- inches_to_emu(0.3)
   x_rel    <- as.integer(round((lx - origin_x_px) * ctx$scale)) - w_emu %/% 2L
@@ -1025,11 +1027,7 @@ emit_edge_label <- function(e, origin_x_px, origin_y_px, ctx, ctr) {
         "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>",
         "<a:noFill/><a:ln w=\"0\"><a:noFill/></a:ln>",
       "</wps:spPr>",
-      "<wps:txbx><w:txbxContent><w:p>",
-        "<w:pPr><w:jc w:val=\"center\"/></w:pPr>",
-        "<w:r>", text_rpr_xml(ctx$dtc, ctx),
-          "<w:t xml:space=\"preserve\">", lbl, "</w:t></w:r>",
-      "</w:p></w:txbxContent></wps:txbx>",
+      "<wps:txbx>", label_txbx_xml(e$label %||% "", ctx$dtc, "center", ctx), "</wps:txbx>",
       "<wps:bodyPr anchor=\"ctr\"><a:normAutofit/></wps:bodyPr>",
     "</wps:wsp>"
   )

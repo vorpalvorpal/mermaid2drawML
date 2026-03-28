@@ -541,10 +541,19 @@ parse_polygon_points <- function(pts_str) {
 }
 
 extract_node_label <- function(g) {
-  # Try <foreignObject> → inner text, then <text>
+  # Try <foreignObject> → inner HTML (preserving <br> as \n), then <text>
   fo <- xml2::xml_find_first(g, ".//foreignObject")
   if (!inherits(fo, "xml_missing")) {
-    txt <- trimws(xml2::xml_text(fo))
+    # Serialise to a string so <br> tags are visible, then normalise them to \n
+    # before stripping all remaining HTML/SVG tags.
+    raw <- as.character(fo)
+    raw <- gsub("<br\\s*/?>", "\n", raw, perl = TRUE, ignore.case = TRUE)
+    raw <- gsub("<[^>]+>", "", raw)
+    # Trim each line, drop blank lines, then rejoin with \n
+    lines <- strsplit(raw, "\n", fixed = TRUE)[[1]]
+    lines <- trimws(lines)
+    lines <- lines[nzchar(lines)]
+    txt <- paste(lines, collapse = "\n")
     if (nzchar(txt)) return(txt)
   }
   txt_el <- xml2::xml_find_first(g, ".//text")
