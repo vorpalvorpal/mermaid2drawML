@@ -1,18 +1,19 @@
 %%{init: {
+  'fontFamily': 'Myriad Pro',
   'flowchart': {'defaultRenderer': 'elk'},
   'elk': {'mergeEdges': true, 'nodePlacementStrategy': 'BRANDES_KOEPF'},
   'themeVariables': {
     'fontFamily': 'Myriad Pro',
-    'fontSize': '20px'
+    'fontSize': '10px'
   }
 }}%%
 flowchart LR
     subgraph ENV["Environmental"]
         Contractors(["Contractors"])
         EnvSiteStaff(["Staff"])
-        WeatherDB[("Weather station database")]
-        EnvDB[("Environmental database")]
-        EnvChecklist@{ shape: docs, label: "Monthly/quarterly checklists"}
+        WeatherDB[("Weather station<br>database")]
+        EnvDB[("Environmental<br>database")]
+        EnvChecklist@{ shape: docs, label: "Monthly/quarterly<br>checklists"}
         Contractors --> WeatherDB
         EnvSiteStaff --> EnvDB
         Contractors --> EnvDB
@@ -20,13 +21,13 @@ flowchart LR
     end
 
     subgraph GATE["Gatehouse"]
-        GateSiteStaff(["Weighbridge operators"])
-        TipsiteDB[("Tipsite database")]
+        GateSiteStaff(["Weighbridge<br>operators"])
+        TipsiteDB[("Tipsite\ndatabase")]
         GateSiteStaff --> TipsiteDB
     end
 
     subgraph OPS["Operational"]
-        OpsChecklist@{ shape: docs, label: "Weekly/Monthly checklists"}
+        OpsChecklist@{ shape: docs, label: "Weekly/Monthly<br>checklists"}
         DailyLog@{ shape: doc, label: "Daily Log"}
         OpsSiteStaff(["Operators"])
         OpsSiteStaff --> DailyLog
@@ -34,7 +35,7 @@ flowchart LR
     end
 
     subgraph MANG["Governance"]
-        AutoReports@{ shape: docs, label: "KPI Reports"}
+        AutoReports@{ shape: docs, label: "KPI<br>Reports"}
         Management(["Management"])
         GRSG(["GRSG"])
         ARIC(["ARIC"])
@@ -46,7 +47,7 @@ flowchart LR
 
     subgraph AUD["Audit"]
         Auditors(["Auditors"])
-        AuditReport@{ shape: doc, label: "Audit Report"}
+        AuditReport@{ shape: doc, label: "Audit<br>Report"}
         Auditors --> AuditReport
     end
 
@@ -55,8 +56,8 @@ flowchart LR
         SW(["Sydney Water"])
         Council(["Council"])
         Government(["Government"])
-        Regs@{ shape: docs, label: "Regulations, licences, consents, standards" }
-        Web@{ shape: win-pane, label: "Public website"}
+        Regs@{ shape: docs, label: "Regulations, licenses,<br>consents, standards" }
+        Web@{ shape: win-pane, label: "Public<br>website"}
         Community(["Community"])
         EnvDB --> Web
         WeatherDB --> Web
