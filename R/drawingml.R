@@ -168,6 +168,8 @@ new_id_counter <- function(start = 1L) {
 #'   with e.g. `"Myriad Pro"` if you want a different display font in Word;
 #'   combine with `font_scale < 1.0` if the override font is wider than the
 #'   measurement font to avoid text overflowing node boxes.
+#' @param align Character. Horizontal alignment of the drawing on the page:
+#'   `"center"` (default), `"left"`, or `"right"`.
 #' @return Named list: xml (character) and next_id (integer).
 #' @export
 build_diagram_xml <- function(svg_data,
@@ -181,7 +183,9 @@ build_diagram_xml <- function(svg_data,
                                default_text_color = "000000",
                                stroke_width_pt    = 1.5,
                                font_scale         = 1.0,
-                               word_font_family   = NULL) {
+                               word_font_family   = NULL,
+                               align              = c("center", "left", "right")) {
+  align <- match.arg(align)
 
   nodes  <- svg_data$nodes
   edges  <- svg_data$edges
@@ -309,7 +313,8 @@ build_diagram_xml <- function(svg_data,
 
   children_xml <- paste0(parts, collapse = "")
   anchor_xml   <- make_super_anchor(off_x, off_y, sg_w_emu, sg_h_emu,
-                                     as.integer(start_id), children_xml)
+                                     as.integer(start_id), children_xml,
+                                     h_align = align)
 
   xml <- paste0('<w:p ', .dml_namespaces, '>', anchor_xml, '</w:p>')
   list(xml = xml, next_id = ctr$peek())
@@ -373,9 +378,17 @@ make_nested_grpSp <- function(grp_id, name, x_rel, y_rel, w_emu, h_emu,
 # ── Super-group anchor ──────────────────────────────────────────────────────
 
 make_super_anchor <- function(x_page, y_page, w_emu, h_emu, shape_id,
-                               children_xml) {
+                               children_xml, h_align = "center") {
   w_emu <- max(as.integer(w_emu), 91440L)
   h_emu <- max(as.integer(h_emu), 91440L)
+  # Horizontal position: centre/right use <wp:align> relative to the text
+  # column; left uses an absolute offset of 0 from the column edge.
+  h_pos_xml <- if (h_align %in% c("center", "right")) {
+    paste0('<wp:positionH relativeFrom="column"><wp:align>',
+           h_align, '</wp:align></wp:positionH>')
+  } else {
+    '<wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH>'
+  }
   # mc:AlternateContent with mc:Choice Requires="wpg" is required for Word to
   # activate its wpg namespace handler. Without this wrapper, nested wpg:grpSp
   # groups do not render even when the XML is otherwise spec-conformant.
@@ -388,8 +401,7 @@ make_super_anchor <- function(x_page, y_page, w_emu, h_emu, shape_id,
       'simplePos="0" relativeHeight="251658240" behindDoc="0" ',
       'locked="0" layoutInCell="1" allowOverlap="1">',
     '<wp:simplePos x="0" y="0"/>',
-    '<wp:positionH relativeFrom="page"><wp:posOffset>',
-      as.integer(x_page), '</wp:posOffset></wp:positionH>',
+    h_pos_xml,
     '<wp:positionV relativeFrom="page"><wp:posOffset>',
       as.integer(y_page), '</wp:posOffset></wp:positionV>',
     '<wp:extent cx="', w_emu, '" cy="', h_emu, '"/>',
