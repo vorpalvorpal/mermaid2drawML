@@ -8,37 +8,37 @@
   }
 }}%%
 flowchart LR
-    subgraph ENV["Environmental"]
-        Contractors(["Contractors"])
-        EnvSiteStaff(["Staff"])
-        WeatherDB[("Weather station<br>database")]
-        EnvDB[("Environmental<br>database")]
+    subgraph ENV["Monitoring"]
+        Contractors(["Contractors"]):::green
+        EnvSiteStaff(["Staff"]):::green
+        WeatherDB@{ shape: fr-rect, label: "Weather<br>station"}
+        EnvDB[("Enviro<br>monitoring<br>database")]:::green
         EnvChecklist@{ shape: docs, label: "Monthly/quarterly<br>checklists"}
-        Contractors --> WeatherDB
+        Scada@{ shape: fr-rect, label: "SCADA"}
         EnvSiteStaff --> EnvDB
         Contractors --> EnvDB
         EnvSiteStaff --> EnvChecklist
     end
 
     subgraph GATE["Gatehouse"]
-        GateSiteStaff(["Weighbridge<br>operators"])
-        TipsiteDB[("Tipsite\ndatabase")]
+        GateSiteStaff(["Weighbridge<br>operators"]):::purple
+        TipsiteDB[("Tipsite\ndatabase")]:::purple
         GateSiteStaff --> TipsiteDB
     end
 
     subgraph OPS["Operational"]
         OpsChecklist@{ shape: docs, label: "Weekly/Monthly<br>checklists"}
         DailyLog@{ shape: doc, label: "Daily Log"}
-        OpsSiteStaff(["Operators"])
+        OpsSiteStaff(["Operators"]):::red
         OpsSiteStaff --> DailyLog
         OpsSiteStaff --> OpsChecklist
     end
 
     subgraph MANG["Governance"]
         AutoReports@{ shape: docs, label: "KPI<br>Reports"}
-        Management(["Management"])
-        GRSG(["GRSG"])
-        ARIC(["ARIC"])
+        Management(["Management"]):::blue
+        GRSG(["GRSG"]):::blue
+        ARIC(["ARIC"]):::blue
         SOPs@{ shape: docs, label: "LEMP, SOPs"}
         Management --> SOPs
         Management --> GRSG
@@ -46,23 +46,22 @@ flowchart LR
     end
 
     subgraph AUD["Audit"]
-        Auditors(["Auditors"])
+        Auditors(["Auditors"]):::orange
         AuditReport@{ shape: doc, label: "Audit<br>Report"}
         Auditors --> AuditReport
     end
 
     subgraph REG["External"]
-        EPA(["EPA"])
-        SW(["Sydney Water"])
-        Council(["Council"])
-        Government(["Government"])
-        Regs@{ shape: docs, label: "Regulations, licenses,<br>consents, standards" }
+        EPA(["EPA"]):::bark
+        SW(["Sydney Water"]):::bark
+        Council(["Council"]):::bark
+        Government(["Government"]):::bark
+        Regs@{ shape: docs, label: "Regulations, licenses,<br>consents, standards"}
         Web@{ shape: win-pane, label: "Public<br>website"}
-        Community(["Community"])
+        Community(["Community"]):::bark
         EnvDB --> Web
         WeatherDB --> Web
         Web --> Community
-        
         Government --> Regs
         EPA --> Regs
         SW --> Regs
@@ -74,8 +73,9 @@ flowchart LR
     TipsiteDB --> EPA
     Regs --> SOPs
 
-    EnvChecklist --> AutoReports
     EnvDB --> AutoReports
+    Scada --> AutoReports
+    EnvChecklist --> AutoReports
     OpsChecklist --> AutoReports
     DailyLog --> Auditors
     OpsChecklist --> Auditors
@@ -86,8 +86,8 @@ flowchart LR
     AutoReports --> Management
     EnvChecklist --> Auditors
     AuditReport --> ARIC
-    SOPs --> OpsSiteStaff
     SOPs --> Auditors
+    SOPs --> OpsSiteStaff
     SOPs --> EnvSiteStaff
     SOPs --> Contractors
     SOPs --> GateSiteStaff
@@ -97,26 +97,31 @@ flowchart LR
     classDef purple fill:none,stroke:#9186BF,color:#9186BF
     classDef orange fill:none,stroke:#cc6600,color:#cc6600
     classDef blue   fill:none,stroke:#0066cc,color:#0066cc
-    classDef canyon fill:none,stroke:#5E504E,color:#5E504E
+    classDef bark   fill:none,stroke:#5E504E,color:#5E504E
 
-    class Contractors,EnvSiteStaff,WeatherDB,EnvDB,EnvChecklist green
-    class OpsSiteStaff,OpsChecklist,DailyLog red
-    class GateSiteStaff,TipsiteDB purple
-    class Auditors,AuditReport orange
-    class Management,GRSG,ARIC,AutoReports,SOPs blue
-    class EPA,SW,Council,Government,Regs,Web,Community canyon
+    classDef GREEN  fill:none,stroke:#5A8263,color:#5A8263,stroke-width:4px,font-size:16px,font-weight:bold
+    classDef RED    fill:none,stroke:#700017,color:#700017,stroke-width:4px,font-size:16px,font-weight:bold
+    classDef PURPLE fill:none,stroke:#9186BF,color:#9186BF,stroke-width:4px,font-size:16px,font-weight:bold
+    classDef ORANGE fill:none,stroke:#cc6600,color:#cc6600,stroke-width:4px,font-size:16px,font-weight:bold
+    classDef BLUE   fill:none,stroke:#0066cc,color:#0066cc,stroke-width:4px,font-size:16px,font-weight:bold
+    classDef BARK   fill:none,stroke:#5E504E,color:#5E504E,stroke-width:4px,font-size:16px,font-weight:bold
 
-    style ENV  fill:none,stroke:#5A8263,color:#5A8263,stroke-width:4px
-    style OPS  fill:none,stroke:#700017,color:#700017,stroke-width:4px
-    style GATE fill:none,stroke:#9186BF,color:#9186BF,stroke-width:4px
-    style AUD  fill:none,stroke:#cc6600,color:#cc6600,stroke-width:4px
-    style MANG fill:none,stroke:#0066cc,color:#0066cc,stroke-width:4px
-    style REG  fill:none,stroke:#5E504E,color:#5E504E,stroke-width:4px
+    class WeatherDB,EnvChecklist,Scada green
+    class OpsChecklist,DailyLog red
+    class AutoReports,SOPs blue
+    class AuditReport orange
+    class Regs,Web bark
 
-    linkStyle 0,1,2,3,11,12,18,19,22,23,28,32    stroke:#3d7a56,stroke-width:2px
-    linkStyle 5,6,24,25,26,27                     stroke:#8B3344,stroke-width:2px
-    linkStyle 4,20,29                             stroke:#7d7aa8,stroke-width:2px
-    linkStyle 10,30,33                            stroke:#a07040,stroke-width:2px
-    linkStyle 7,8,9,31,34,35,36,37,38            stroke:#4d80a8,stroke-width:2px
-    linkStyle 13,14,15,16,17,21                  stroke:#7a6a67,stroke-width:2px
+    class ENV GREEN
+    class GATE PURPLE
+    class OPS RED
+    class MANG BLUE
+    class AUD ORANGE
+    class REG BARK
 
+    linkStyle 0,1,2,10,11,17,18,21,22,23,28,32  stroke:#3d7a56,stroke-width:2px
+    linkStyle 4,5,24,25,26,27                    stroke:#8B3344,stroke-width:2px
+    linkStyle 3,19,29                            stroke:#7d7aa8,stroke-width:2px
+    linkStyle 9,30,33                            stroke:#a07040,stroke-width:2px
+    linkStyle 6,7,8,31,34,35,36,37,38           stroke:#4d80a8,stroke-width:2px
+    linkStyle 12,13,14,15,16,20                 stroke:#7a6a67,stroke-width:2px
