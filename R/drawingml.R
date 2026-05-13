@@ -198,29 +198,26 @@ build_diagram_xml <- function(svg_data,
   off_x  <- inches_to_emu(margin_in)
   off_y  <- inches_to_emu(margin_in)
 
-  # Font size: take the larger of the proportionally-scaled value and the
-  # direct CSS-px-to-half-points conversion (px × 1.5, i.e. px × 72/96 × 2).
-  # The proportional formula keeps text the same relative size as the SVG but
-  # can produce unreadably small results for complex wide diagrams. The CSS
-  # floor ensures Word never uses a font smaller than the mermaid fontSize
-  # setting's physical equivalent (e.g. 10px CSS → 15hp = 7.5pt).
-  # The absolute floor (14hp = 7pt) prevents sub-6pt text on very wide/complex
-  # diagrams where the proportional value would be tiny.
+  # Font size: scale CSS pixels to half-points using the same SVG→page scale
+  # factor applied to all geometry, so the rendered text remains proportional
+  # to the shapes that hold it. Formula:
   #
-  # IMPORTANT — font metric mismatch: if the `fontFamily` in the mermaid
-  # %%{init}%% block (e.g. "Myriad Pro") is NOT available in the Chromium /
-  # Puppeteer environment used by mermaid-cli, Chromium falls back to a
-  # narrower font (typically Trebuchet MS or the system default sans-serif).
-  # The SVG foreignObject dimensions are then sized for the narrower font.
-  # When Word renders the same diagram using the declared font (e.g. Myriad Pro,
-  # which IS installed on the user's system), the wider character metrics cause
-  # text to overflow those tight boxes.  Use `font_scale < 1.0` to compensate:
-  # a value of ~0.85 works well when Myriad Pro is the Word font but Trebuchet
-  # MS was the effective measurement font in Chromium.
+  #   proportional_hp = font_size_px × scale / 6350
+  #
+  # where 6350 EMU = 1 half-point (12700 EMU/pt ÷ 2). When the SVG is rendered
+  # at full size (scale = 9525 EMU/px at 96 DPI) this equals px × 1.5, i.e. the
+  # CSS-pixel-to-half-point conversion. When the SVG is shrunk to fit the page
+  # (scale < 9525) the font shrinks with it so text continues to fit the
+  # foreignObject geometry — which is the cardinal principle: the SVG sets all
+  # the spacing.
+  #
+  # An absolute floor of 14 half-points (7pt) guards against unreadably tiny
+  # text on diagrams that scale down extremely. font_scale (default 1.0) is
+  # available as an escape hatch when the Word display font has wider metrics
+  # than the SVG measurement font.
   font_size_hp <- max(
     as.integer(round(sty$font_size_px * scale / 6350)),  # proportional
-    as.integer(round(sty$font_size_px * 1.5)),            # CSS px -> half-pts
-    14L                                                    # absolute floor 7pt
+    14L                                                    # readability floor 7pt
   )
   font_size_hp <- max(as.integer(round(font_size_hp * font_scale)), 10L)
 
@@ -626,10 +623,12 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
   text_col <- sg$color %||% NA_character_
   if (is.na(text_col)) text_col <- if (!is.na(fill_hex) && is_dark(fill_hex)) "FFFFFF" else ctx$dtc
 
-  # Per-subgraph font properties from classDef CSS rules (font_size_px / font_bold)
+  # Per-subgraph font properties from classDef CSS rules (font_size_px / font_bold).
+  # Scale the CSS px by the same SVG→page scale used for geometry so the label
+  # keeps its proportions to the cluster rect.
   sg_font_size_px <- sg$font_size_px %||% NA_real_
   sg_font_size_hp <- if (!is.na(sg_font_size_px))
-    max(as.integer(round(sg_font_size_px * 1.5)), 14L) else NULL
+    max(as.integer(round(sg_font_size_px * ctx$scale / 6350)), 14L) else NULL
   sg_bold <- isTRUE(sg$font_bold)
 
   descr <- jsonlite::toJSON(list(
