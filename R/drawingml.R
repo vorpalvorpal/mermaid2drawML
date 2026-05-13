@@ -87,6 +87,14 @@
   text          = "rect"              # transparent annotation label
 )
 
+# Safety margin applied to the text-overlay box used by non-rect shapes
+# (hexagon/diamond/parallelogram/etc.).  Chromium measures the foreignObject
+# tightly around the text; Word's text layout has slightly different metrics,
+# so a flush-fit textbox tends to clip the last 1–2 characters of long labels.
+# 1.15 (15 %) is a safe margin that fits within the shape bounding box for
+# every shape mermaid emits.
+.TXT_SAFETY <- 1.15
+
 # ── ID counter ─────────────────────────────────────────────────────────────
 
 # Build the <w:rPr> XML for a labelled text run.
@@ -215,11 +223,16 @@ build_diagram_xml <- function(svg_data,
   # text on diagrams that scale down extremely. font_scale (default 1.0) is
   # available as an escape hatch when the Word display font has wider metrics
   # than the SVG measurement font.
-  font_size_hp <- max(
-    as.integer(round(sty$font_size_px * scale / 6350)),  # proportional
-    14L                                                    # readability floor 7pt
-  )
+  proportional_hp_raw <- sty$font_size_px * scale / 6350
+  font_size_hp <- max(as.integer(round(proportional_hp_raw)), 14L)
   font_size_hp <- max(as.integer(round(font_size_hp * font_scale)), 10L)
+
+  # font_inflation: when the readability floor (or font_scale) inflates the
+  # rendered font above the value the SVG foreignObject was measured for, the
+  # text overlay used by non-rect shapes must grow by the same ratio to keep
+  # the text from overflowing. 1.0 when no floor is active.
+  font_inflation <- if (proportional_hp_raw > 0)
+    max(font_size_hp / proportional_hp_raw, 1.0) else 1.0
 
   # Font family for Word <w:rFonts>: use word_font_family if explicitly supplied,
   # otherwise use the measurement font from the SVG (--mermaid-font-family,
@@ -240,6 +253,7 @@ build_diagram_xml <- function(svg_data,
     vb             = vb,
     scale          = scale,
     font_size_hp   = font_size_hp,
+    font_inflation = font_inflation,
     font_family    = font_family,
     edge_stroke    = edge_stroke,
     edge_sw_emu    = edge_sw_emu,
@@ -786,12 +800,26 @@ emit_node_grpSp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
   grp_id     <- ctr$next_id()
   visual_xml <- node_visual_wsp(nd, w_emu, h_emu, ctx, ctr)
 
+  # Text-overlay dimensions: start from the foreignObject text area, inflated
+  # by:
+  #   1. font_inflation — the ratio by which the readability floor (or
+  #      font_scale) renders the font larger than Chromium measured it.
+  #   2. .TXT_SAFETY (15%) — a fixed safety margin to absorb sub-pixel layout
+  #      differences between Chromium's foreignObject measurement and Word's
+  #      text rendering.  Without it the overlay sits flush against the text
+  #      and any rounding pushes characters into the clipped region.
+  # The result is capped at the shape's bounding box so the overlay never
+  # spills past the visual outline.  For diamond/hex shapes the cap leaves
+  # plenty of room — their foreignObjects are 40–80 % of the shape width.
+  infl   <- (ctx$font_inflation %||% 1.0) * .TXT_SAFETY
   raw_tw <- nd$txt_w %||% NA_real_
   raw_th <- nd$txt_h %||% NA_real_
   tw_emu <- if (!is.na(raw_tw) && raw_tw > 0)
-              as.integer(round(raw_tw * ctx$scale)) else w_emu
+              as.integer(round(raw_tw * ctx$scale * infl)) else w_emu
   th_emu <- if (!is.na(raw_th) && raw_th > 0)
-              as.integer(round(raw_th * ctx$scale)) else h_emu
+              as.integer(round(raw_th * ctx$scale * infl)) else h_emu
+  tw_emu <- min(tw_emu, w_emu)
+  th_emu <- min(th_emu, h_emu)
   tx_rel <- (w_emu - tw_emu) %/% 2L
   ty_rel <- (h_emu - th_emu) %/% 2L
 
