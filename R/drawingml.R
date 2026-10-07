@@ -257,7 +257,8 @@ build_diagram_xml <- function(svg_data,
     font_family    = font_family,
     edge_stroke    = edge_stroke,
     edge_sw_emu    = edge_sw_emu,
-    default_fill   = default_fill,
+    edge_label_bg  = sty$edge_label_bg %||% "FFFFFF",
+    default_fill  = default_fill,
     default_stroke = default_stroke,
     dtc            = default_text_color,
     sw_pt          = stroke_width_pt
@@ -1079,9 +1080,31 @@ emit_edge_label <- function(e, origin_x_px, origin_y_px, ctx, ctr) {
   ly <- as.numeric(e$label_y %||% NA_real_)
   if (is.na(lx) || is.na(ly)) return("")
 
+  # When the parser measured the label, draw the box at that size (grown by
+  # the same ratio as any font inflation) and fill it with mermaid's edge-label
+  # background, so the edge does not strike through the text. Without a
+  # measured size, fall back to a generous unfilled box that hides nothing.
+  lw <- as.numeric(e$label_w %||% NA_real_)
+  lh <- as.numeric(e$label_h %||% NA_real_)
+  measured <- !is.na(lw) && !is.na(lh) && lw > 0 && lh > 0
+
   shape_id <- ctr$next_id()
-  w_emu    <- inches_to_emu(1.2)
-  h_emu    <- inches_to_emu(0.3)
+  if (measured) {
+    w_emu    <- as.integer(round(lw * ctx$scale * ctx$font_inflation))
+    h_emu    <- as.integer(round(lh * ctx$scale * ctx$font_inflation))
+    fill_xml <- paste0("<a:solidFill><a:srgbClr val=\"", ctx$edge_label_bg,
+                       "\"/></a:solidFill>")
+    # Mermaid sized the box to its own text measurement, so leave no insets
+    # and do not let a marginally wider Word font wrap the label.
+    body_xml <- paste0("<wps:bodyPr wrap=\"none\" anchor=\"ctr\" ",
+                       "lIns=\"0\" rIns=\"0\" tIns=\"0\" bIns=\"0\">",
+                       "<a:normAutofit/></wps:bodyPr>")
+  } else {
+    w_emu    <- inches_to_emu(1.2)
+    h_emu    <- inches_to_emu(0.3)
+    fill_xml <- "<a:noFill/>"
+    body_xml <- "<wps:bodyPr anchor=\"ctr\"><a:normAutofit/></wps:bodyPr>"
+  }
   x_rel    <- as.integer(round((lx - origin_x_px) * ctx$scale)) - w_emu %/% 2L
   y_rel    <- as.integer(round((ly - origin_y_px) * ctx$scale)) - h_emu %/% 2L
 
@@ -1098,10 +1121,10 @@ emit_edge_label <- function(e, origin_x_px, origin_y_px, ctx, ctr) {
           "<a:ext cx=\"", w_emu, "\" cy=\"", h_emu, "\"/>",
         "</a:xfrm>",
         "<a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom>",
-        "<a:noFill/><a:ln w=\"0\"><a:noFill/></a:ln>",
+        fill_xml, "<a:ln w=\"0\"><a:noFill/></a:ln>",
       "</wps:spPr>",
       "<wps:txbx>", label_txbx_xml(e$label %||% "", ctx$dtc, "center", ctx), "</wps:txbx>",
-      "<wps:bodyPr anchor=\"ctr\"><a:normAutofit/></wps:bodyPr>",
+      body_xml,
     "</wps:wsp>"
   )
 }

@@ -232,6 +232,45 @@ test_that("edge label produces additional wsp text box", {
             count_wsps(build_diagram_xml(d_no_lbl)$xml))
 })
 
+# The spPr of the edge-label text box in a build_diagram_xml() result.
+edge_label_sppr <- function(xml) {
+  xml2::xml_find_first(xml2::read_xml(xml), paste0(
+    "//*[local-name()='wsp']",
+    "[.//*[local-name()='cNvPr'][starts-with(@name,'mermaid:edge_label')]]",
+    "/*[local-name()='spPr']"))
+}
+
+test_that("measured edge label is sized to the label and filled", {
+  d <- make_svg_data(edge_label = "yes")
+  d$edges$label_w <- 60
+  d$edges$label_h <- 28
+  d$style <- list(font_size_px = 14, edge_stroke = "333333", edge_sw_px = 2,
+                  edge_label_bg = "E8E8E8")
+  res  <- build_diagram_xml(d)
+  sppr <- edge_label_sppr(res$xml)
+
+  fill <- xml2::xml_find_first(sppr, "./*[local-name()='solidFill']/*")
+  expect_equal(xml2::xml_attr(fill, "val"), "E8E8E8")
+
+  # Box is the label's own size (px × scale), centred on label_x / label_y.
+  ext <- xml2::xml_find_first(sppr, ".//*[local-name()='ext']")
+  off <- xml2::xml_find_first(sppr, ".//*[local-name()='off']")
+  cx  <- as.numeric(xml2::xml_attr(ext, "cx"))
+  cy  <- as.numeric(xml2::xml_attr(ext, "cy"))
+  expect_equal(cx / cy, 60 / 28, tolerance = 0.01)
+  expect_equal((as.numeric(xml2::xml_attr(off, "x")) + cx / 2) /
+               (as.numeric(xml2::xml_attr(off, "y")) + cy / 2),
+               175 / 50, tolerance = 0.01)
+})
+
+test_that("edge label without a measured size stays unfilled", {
+  sppr <- edge_label_sppr(build_diagram_xml(make_svg_data(edge_label = "yes"))$xml)
+  expect_false(inherits(xml2::xml_find_first(sppr, "./*[local-name()='noFill']"),
+                        "xml_missing"))
+  expect_true(inherits(xml2::xml_find_first(sppr, "./*[local-name()='solidFill']"),
+                       "xml_missing"))
+})
+
 # ── Shape ID management ────────────────────────────────────────────────────
 
 test_that("no shape ID collision across two diagrams", {
