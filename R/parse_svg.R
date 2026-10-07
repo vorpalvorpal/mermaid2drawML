@@ -27,8 +27,9 @@
 parse_mermaid_svg <- function(svg, ast = NULL, source = NULL) {
   doc <- xml2::read_xml(svg)
   xml2::xml_ns_strip(doc)                  # drop SVG namespace for easier xpath
+  strip_svg_id_prefix(doc)                 # "my-svg-flowchart-A-0" -> "flowchart-A-0"
 
-  vb        <- parse_viewbox(doc)
+  vb       <- parse_viewbox(doc)
   style     <- extract_svg_style(doc)
   nodes     <- extract_nodes(doc, ast)
 
@@ -48,6 +49,33 @@ parse_mermaid_svg <- function(svg, ast = NULL, source = NULL) {
   edges     <- extract_edges(doc, nodes)
 
   list(nodes = nodes, subgraphs = subgraphs, edges = edges, viewbox = vb, style = style)
+}
+
+#' Remove the SVG-id prefix that newer mermaid adds to element ids
+#'
+#' Mermaid 11.x namespaces every element id with the id of the root `<svg>`
+#' (`my-svg-flowchart-A-0`, `my-svg-L_A_B_0`) so that several diagrams can
+#' share one page. Earlier versions emitted the bare id (`flowchart-A-0`).
+#' Stripping the prefix once, up front, lets the rest of the parser see the
+#' same ids whichever version rendered the diagram. Ids without the prefix are
+#' left alone, so this is a no-op on older output.
+#'
+#' @param doc An `xml_document` (modified in place).
+#' @return `doc`, invisibly.
+#' @keywords internal
+strip_svg_id_prefix <- function(doc) {
+  root_id <- xml2::xml_attr(xml2::xml_root(doc), "id")
+  if (is.na(root_id) || !nzchar(root_id)) return(invisible(doc))
+
+  prefix   <- paste0(root_id, "-")
+  els      <- xml2::xml_find_all(doc, ".//*[@id]")
+  ids      <- xml2::xml_attr(els, "id")
+  prefixed <- startsWith(ids, prefix)
+  if (any(prefixed)) {
+    xml2::xml_attr(els[prefixed], "id") <-
+      substring(ids[prefixed], nchar(prefix) + 1L)
+  }
+  invisible(doc)
 }
 
 #' Parse mermaid v11 @{ shape: X } declarations from source text
@@ -228,6 +256,18 @@ extract_svg_style <- function(doc) {
     if (!is.na(sw) && sw > 0) edge_sw_px <- sw
   }
 
+  # Edge label background ---------------------------------------------------
+  # Mermaid emits:  .edgeLabel { background-color: #RRGGBB; text-align: center; }
+  # It is what keeps an edge from striking through its own label.
+  edge_label_bg <- "FFFFFF"
+  m <- regmatches(style_text,
+    regexpr("\\.edgeLabel\\s*\\{[^}]*?background-color\\s*:\\s*[^;}]+",
+            style_text, perl = TRUE))
+  if (length(m) > 0L) {
+    col <- parse_css_colour(sub(".*background-color\\s*:\\s*", "", m[[1]]))
+    if (!is.na(col)) edge_label_bg <- col
+  }
+
   # Cluster default fill / stroke -----------------------------------------
   # Mermaid emits:  .cluster rect { fill: #ffffde; stroke: #aaaa33; ... }
   cluster_fill   <- "FFFFDE"
@@ -255,7 +295,8 @@ extract_svg_style <- function(doc) {
        declared_font_family   = declared_font_family,  # themeVariables fontFamily
        edge_stroke            = edge_stroke,
        edge_sw_px             = edge_sw_px,
-       cluster_fill           = cluster_fill,
+       edge_label_bg          = edge_label_bg,
+       cluster_fill          = cluster_fill,
        cluster_stroke         = cluster_stroke,
        class_styles           = extract_class_styles(style_text))
 }
@@ -954,7 +995,9 @@ extract_edges <- function(doc, nodes_tbl) {
     line_type   = vapply(rows, `[[`, character(1), "line_type"),
     stroke      = vapply(rows, function(r) r$stroke %||% NA_character_, character(1)),
     label_x     = vapply(rows, function(r) r$label_x %||% NA_real_, numeric(1)),
-    label_y     = vapply(rows, function(r) r$label_y %||% NA_real_, numeric(1))
+    label_y     = vapply(rows, function(r) r$label_y %||% NA_real_, numeric(1)),
+    label_w     = vapply(rows, function(r) r$label_w %||% NA_real_, numeric(1)),
+    label_h     = vapply(rows, function(r) r$label_h %||% NA_real_, numeric(1))
   )
 }
 
@@ -965,11 +1008,12 @@ parse_one_edge <- function(path_el, doc, nodes_tbl) {
   anc_off <- ancestor_offset(path_el)
   d       <- offset_svg_path(d, anc_off[1], anc_off[2])
 
-  # Parse from/to — support both mermaid v11 underscore format (L_A_B_0_0)
-  # and older hyphen format (L-A-B-0). Node IDs are assumed not to contain _.
+  # Parse from/to — support the mermaid v11 underscore format, with one or
+  # two trailing counters (L_A_B_0, L_A_B_0_0), and the older hyphen format
+  # (L-A-B-0). Node IDs are assumed not to contain _.
   from <- NA_character_; to <- NA_character_
   m <- regmatches(edge_id,
-        regexec("^L_([^_]+)_([^_]+)_\\d+_\\d+$", edge_id, perl = TRUE))[[1]]
+        regexec("^L_([^_]+)_([^_]+)_\\d+(?:_\\d+)?$", edge_id, perl = TRUE))[[1]]
   if (length(m) == 3L) {
     from <- m[2]; to <- m[3]
   } else {
@@ -1020,7 +1064,9 @@ parse_one_edge <- function(path_el, doc, nodes_tbl) {
     line_type   = line_type,
     stroke      = stroke_col,
     label_x     = lbl_info$x,
-    label_y     = lbl_info$y
+    label_y     = lbl_info$y,
+    label_w     = lbl_info$w,
+    label_h     = lbl_info$h
   )
 }
 
@@ -1033,12 +1079,22 @@ classify_marker <- function(marker_ref) {
 }
 
 find_edge_label <- function(edge_id, doc) {
-  empty <- list(label = NA_character_, x = NA_real_, y = NA_real_)
+  empty <- list(label = NA_character_, x = NA_real_, y = NA_real_,
+                w = NA_real_, h = NA_real_)
   if (!nzchar(edge_id)) return(empty)
 
   # Look for <g id="{edge_id}-label"> or <g class="edgeLabel"> near the path
   lbl_id <- paste0(edge_id, "-label")
   lbl_g  <- xml2::xml_find_first(doc, paste0(".//*[@id='", lbl_id, "']"))
+  if (inherits(lbl_g, "xml_missing")) {
+    # Mermaid 11 gives the label group no id: the edge id is in data-id on the
+    # inner <g class="label">, and the enclosing <g class="edgeLabel"> carries
+    # the position. Match the class as a whole word, because the container of
+    # all labels is class="edgeLabels".
+    lbl_g <- xml2::xml_find_first(doc, paste0(
+      ".//g[contains(concat(' ', normalize-space(@class), ' '), ' edgeLabel ')]",
+      "[.//*[@data-id='", edge_id, "']]"))
+  }
   if (inherits(lbl_g, "xml_missing")) {
     # Try without "-label" suffix matching
     lbl_g <- xml2::xml_find_first(doc,
@@ -1047,13 +1103,30 @@ find_edge_label <- function(edge_id, doc) {
   }
   if (inherits(lbl_g, "xml_missing")) return(empty)
 
-  txt <- trimws(xml2::xml_text(lbl_g))
+  txt <- extract_node_label(lbl_g)
   if (!nzchar(txt)) return(empty)
 
+  # The group's translate is the label centre. Add any ancestor translate so
+  # the label is in the same coordinate space as its (already offset) path.
   tf  <- xml2::xml_attr(lbl_g, "transform") %||% ""
-  pos <- parse_translate(tf)
+  pos <- parse_translate(tf) + ancestor_offset(lbl_g)
 
-  list(label = txt, x = pos[1], y = pos[2])
+  dim <- edge_label_dim(lbl_g)
+
+  list(label = txt, x = pos[1], y = pos[2], w = dim$w, h = dim$h)
+}
+
+# Size of the box mermaid measured for an edge label: the <foreignObject> when
+# labels are HTML, otherwise the <rect class="background"> drawn behind the
+# <text>. NA when neither carries a size.
+edge_label_dim <- function(lbl_g) {
+  dim <- extract_label_dim(lbl_g)
+  if (!is.na(dim$w) && !is.na(dim$h)) return(dim)
+
+  bg <- xml2::xml_find_first(lbl_g, ".//rect[@width and @height]")
+  if (inherits(bg, "xml_missing")) return(list(w = NA_real_, h = NA_real_))
+  list(w = suppressWarnings(as.numeric(xml2::xml_attr(bg, "width"))),
+       h = suppressWarnings(as.numeric(xml2::xml_attr(bg, "height"))))
 }
 
 empty_edges_tbl <- function() {
@@ -1062,7 +1135,8 @@ empty_edges_tbl <- function() {
     label = character(), path_d = character(),
     arrow_start = character(), arrow_end = character(),
     line_type = character(), stroke = character(),
-    label_x = numeric(), label_y = numeric()
+    label_x = numeric(), label_y = numeric(),
+    label_w = numeric(), label_h = numeric()
   )
 }
 

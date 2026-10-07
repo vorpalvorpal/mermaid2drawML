@@ -165,6 +165,96 @@ test_that("mermaid id extracted from flowchart-X-N pattern", {
   expect_equal(data$nodes$id, "StartNode")
 })
 
+# ── Element ids and edge labels ────────────────────────────────────────────
+
+# A two-node diagram with one labelled and one unlabelled edge, laid out the
+# way mermaid 11 writes it. `prefix` is what mermaid 11.17 puts in front of
+# every element id (the id of the root <svg> plus "-"); "" gives the bare ids
+# of earlier versions. `label_body` is the content of the labelled edge's
+# <g class="label">: SVG text by default, a <foreignObject> for HTML labels.
+edge_svg <- function(prefix = "my-svg-",
+                     label_body = paste0(
+                       '<g><rect class="background" x="-30" y="-1" width="60" height="28"/>',
+                       '<text y="-10.1"><tspan class="row">',
+                       '<tspan>Self</tspan><tspan> haul</tspan></tspan></text></g>')) {
+  edge_path <- function(id, d) paste0(
+    '<path d="', d, '" id="', prefix, id, '" class="flowchart-link" ',
+    'data-id="', id, '" marker-end="url(#my-svg_flowchart-v2-pointEnd)"/>')
+  paste0(
+    '<svg id="my-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 200">',
+    '<style>#my-svg .edgeLabel{background-color:#E8E8E8;text-align:center;}</style>',
+    '<g class="root">',
+    '<g class="edgePaths">',
+    edge_path("L_A_B_0", "M140,50L260,50"),
+    edge_path("L_B_A_0", "M260,60L140,60"),
+    '</g>',
+    '<g class="edgeLabels">',
+    '<g class="edgeLabel" transform="translate(200, 50)">',
+    '<g class="label" data-id="L_A_B_0" transform="translate(0, -13)">',
+    label_body, '</g></g>',
+    '<g class="edgeLabel"><g class="label" data-id="L_B_A_0" ',
+    'transform="translate(0, 0)"><text><tspan class="row"/></text></g></g>',
+    '</g>',
+    '<g class="nodes">',
+    node_g(paste0(prefix, "flowchart-A-0"), transform = "translate(100,50)"),
+    node_g(paste0(prefix, "flowchart-B-1"), transform = "translate(300,50)"),
+    '</g></g></svg>'
+  )
+}
+
+test_that("svg-id prefix is stripped from node and edge ids", {
+  data <- parse_mermaid_svg(edge_svg())
+  expect_equal(data$nodes$id, c("A", "B"))
+  expect_equal(data$edges$id, c("L_A_B_0", "L_B_A_0"))
+  expect_equal(data$edges$from, c("A", "B"))
+  expect_equal(data$edges$to,   c("B", "A"))
+})
+
+test_that("ids without the svg-id prefix parse the same way", {
+  expect_equal(parse_mermaid_svg(edge_svg(prefix = "")),
+               parse_mermaid_svg(edge_svg()))
+})
+
+test_that("strip_svg_id_prefix leaves other ids alone", {
+  doc <- xml2::read_xml('<svg id="s"><g id="s-a"/><g id="t-a"/><g id="sa"/></svg>')
+  strip_svg_id_prefix(doc)
+  expect_equal(xml2::xml_attr(xml2::xml_children(doc), "id"), c("a", "t-a", "sa"))
+
+  no_id <- xml2::read_xml('<svg><g id="s-a"/></svg>')
+  expect_no_error(strip_svg_id_prefix(no_id))
+  expect_equal(xml2::xml_attr(xml2::xml_children(no_id), "id"), "s-a")
+})
+
+test_that("@{ shape } overrides match nodes with prefixed ids", {
+  data <- parse_mermaid_svg(edge_svg(), source = "flowchart LR\n  A@{ shape: cyl }\n  A --> B")
+  expect_false(data$nodes$shape[data$nodes$id == "A"] == "rect")
+  expect_equal(data$nodes$shape[data$nodes$id == "B"], "rect")
+})
+
+test_that("edge label is found through data-id, with position and size", {
+  edges <- parse_mermaid_svg(edge_svg())$edges
+  expect_equal(edges$label,   c("Self haul", NA))
+  expect_equal(edges$label_x, c(200, NA))
+  expect_equal(edges$label_y, c(50, NA))
+  expect_equal(edges$label_w, c(60, NA))
+  expect_equal(edges$label_h, c(28, NA))
+})
+
+test_that("HTML edge label keeps line breaks and takes its size from foreignObject", {
+  html <- paste0('<foreignObject width="74" height="48"><div class="labelBkg">',
+                 '<span class="edgeLabel"><p>two words<br/>two lines</p></span>',
+                 '</div></foreignObject>')
+  edges <- parse_mermaid_svg(edge_svg(label_body = html))$edges
+  expect_equal(edges$label[1],   "two words\ntwo lines")
+  expect_equal(edges$label_w[1], 74)
+  expect_equal(edges$label_h[1], 48)
+})
+
+test_that("edge label background colour is read from the stylesheet", {
+  expect_equal(parse_mermaid_svg(edge_svg())$style$edge_label_bg, "E8E8E8")
+  expect_equal(parse_mermaid_svg(minimal_svg())$style$edge_label_bg, "FFFFFF")
+})
+
 # ── Empty SVG ─────────────────────────────────────────────────────────────
 
 test_that("empty SVG returns empty node/edge tibbles", {
