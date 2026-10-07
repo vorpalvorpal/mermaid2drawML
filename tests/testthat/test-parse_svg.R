@@ -80,6 +80,63 @@ test_that("polygon with 4 points → diamond", {
   expect_equal(data$nodes$shape, "diamond")
 })
 
+# Mermaid draws trapezoids and parallelograms as 4-point polygons too. The
+# point lists below are copied from mermaid 11.17 output (y grows downwards,
+# so y = 0 is the bottom edge).
+
+test_that("polygon with narrow top edge → trapezoid", {
+  # T[/"text"\]
+  el   <- '<polygon points="-31.5,0 121.83,0 90.33,-63 0,-63"/>'
+  svg  <- minimal_svg(node_g("flowchart-T-1", shape_el = el))
+  data <- parse_mermaid_svg(svg)
+  expect_equal(data$nodes$shape, "trapezoid")
+  expect_equal(data$nodes$svg_w, 153.33)
+  expect_equal(data$nodes$svg_h, 63)
+  expect_equal(data$nodes$svg_inset, 31.5)   # run of the slanted sides
+})
+
+test_that("polygon with wide top edge → manualOp (alt trapezoid)", {
+  # T[\"text"/]
+  el   <- '<polygon points="0,0 129.47,0 168.47,-78 -39,-78"/>'
+  svg  <- minimal_svg(node_g("flowchart-T-1", shape_el = el))
+  data <- parse_mermaid_svg(svg)
+  expect_equal(data$nodes$shape, "manualOp")
+})
+
+test_that("polygon with top edge shifted right → leanR", {
+  # P[/text/]
+  el   <- '<polygon points="-19.5,0 87.7,0 107.2,-39 0,-39"/>'
+  svg  <- minimal_svg(node_g("flowchart-P-1", shape_el = el))
+  data <- parse_mermaid_svg(svg)
+  expect_equal(data$nodes$shape, "leanR")
+})
+
+test_that("polygon with top edge shifted left → leanL", {
+  # P[\text\]
+  el   <- '<polygon points="0,0 99,0 79.5,-39 -19.5,-39"/>'
+  svg  <- minimal_svg(node_g("flowchart-P-1", shape_el = el))
+  data <- parse_mermaid_svg(svg)
+  expect_equal(data$nodes$shape, "leanL")
+  expect_equal(data$nodes$svg_inset, 19.5)
+})
+
+test_that("classify_quad does not depend on vertex order", {
+  trap <- data.frame(x = c(0, 90, 120, -30), y = c(-60, -60, 0, 0))
+  expect_equal(classify_quad(trap)$shape, "trapezoid")
+  expect_equal(classify_quad(trap[c(3, 1, 4, 2), ])$shape, "trapezoid")
+  expect_equal(classify_quad(trap)$inset, 30)
+  square <- data.frame(x = c(0, 80, 80, 0), y = c(0, 0, -40, -40))
+  expect_equal(classify_quad(square), list(shape = "rect", inset = NA_real_))
+})
+
+test_that("nodes without slanted sides carry no inset", {
+  svg  <- minimal_svg(node_g("flowchart-A-1"))
+  expect_true(is.na(parse_mermaid_svg(svg)$nodes$svg_inset))
+  el   <- '<polygon points="50,0 0,-25 -50,0 0,25"/>'
+  svg  <- minimal_svg(node_g("flowchart-C-1", shape_el = el))
+  expect_true(is.na(parse_mermaid_svg(svg)$nodes$svg_inset))
+})
+
 test_that("ellipse node parsed correctly", {
   el   <- '<ellipse rx="30" ry="20"/>'
   svg  <- minimal_svg(node_g("flowchart-D-1", shape_el = el))

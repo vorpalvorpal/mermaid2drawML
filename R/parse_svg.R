@@ -320,6 +320,7 @@ extract_nodes <- function(doc, ast) {
     svg_h    = vapply(rows, `[[`, numeric(1),   "svg_h"),
     txt_w    = vapply(rows, `[[`, numeric(1),   "txt_w"),
     txt_h    = vapply(rows, `[[`, numeric(1),   "txt_h"),
+    svg_inset = vapply(rows, `[[`, numeric(1),  "svg_inset"),
     fill     = vapply(rows, `[[`, character(1), "fill"),
     stroke   = vapply(rows, `[[`, character(1), "stroke"),
     color    = vapply(rows, `[[`, character(1), "color"),
@@ -375,6 +376,7 @@ parse_one_node <- function(g) {
     svg_h   = geom$svg_h,
     txt_w   = txtdim$w,   # foreignObject width  (NA if not found)
     txt_h   = txtdim$h,   # foreignObject height (NA if not found)
+    svg_inset = geom$svg_inset %||% NA_real_,  # slant run (NA unless slanted)
     fill    = fill   %||% NA_character_,
     stroke  = stroke %||% NA_character_,
     color   = color  %||% NA_character_,
@@ -465,10 +467,13 @@ element_geometry <- function(el, pos) {
     if (nrow(pts) == 0L) return(list(shape="rect", svg_cx=cx, svg_cy=cy, svg_w=60, svg_h=30))
     w    <- max(pts$x) - min(pts$x)
     h    <- max(pts$y) - min(pts$y)
-    # Classify by number of distinct y-levels: 2→diamond, 3→hexagon-ish
+    # Classify by vertex count: 4 → quadrilateral (see classify_quad()),
+    # 6 → hexagon.
     n_pts <- nrow(pts)
-    shape <- if (n_pts == 4L) "diamond" else if (n_pts == 6L) "hexagon" else "rect"
-    list(shape = shape, svg_cx = cx, svg_cy = cy, svg_w = w, svg_h = h)
+    quad  <- if (n_pts == 4L) classify_quad(pts) else NULL
+    shape <- if (n_pts == 4L) quad$shape else if (n_pts == 6L) "hexagon" else "rect"
+    list(shape = shape, svg_cx = cx, svg_cy = cy, svg_w = w, svg_h = h,
+         svg_inset = quad$inset %||% NA_real_)
 
   } else if (tag == "ellipse") {
     rx <- as.numeric(xml2::xml_attr(el, "rx") %||% "30")
@@ -526,6 +531,47 @@ element_geometry <- function(el, pos) {
          svg_w  = bb$w,
          svg_h  = bb$h)
   }
+}
+
+# Classify a 4-point polygon from its vertices.
+#
+# Mermaid draws five different node shapes as a 4-point <polygon>, so the
+# vertex count alone cannot tell them apart. A rhombus has one vertex on each
+# side of its bounding box; the other four have a horizontal top edge and a
+# horizontal bottom edge, and differ in how those two edges relate:
+#
+#   {text}    one vertex per side              → "diamond"
+#   [/text\]  top edge narrower than bottom    → "trapezoid"
+#   [\text/]  top edge wider than bottom       → "manualOp"
+#   [/text/]  equal edges, top shifted right   → "leanR"
+#   [\text\]  equal edges, top shifted left    → "leanL"
+#
+# `pts` is a data frame of x/y in SVG user units (y grows downwards).
+# Returns list(shape, inset), where `inset` is the horizontal run of the
+# slanted sides in SVG units (NA for shapes without slanted sides). The
+# emitter uses it to give the Word preset the same slope as the SVG.
+classify_quad <- function(pts) {
+  tol    <- 1e-3 * max(diff(range(pts$x)), diff(range(pts$y)), 1)
+  top    <- pts$x[abs(pts$y - min(pts$y)) < tol]
+  bottom <- pts$x[abs(pts$y - max(pts$y)) < tol]
+  if (length(top) != 2L || length(bottom) != 2L)
+    return(list(shape = "diamond", inset = NA_real_))
+
+  shift    <- min(top) - min(bottom)
+  top_w    <- diff(range(top))
+  bottom_w <- diff(range(bottom))
+  shape <- if (top_w < bottom_w - tol) {
+    "trapezoid"
+  } else if (top_w > bottom_w + tol) {
+    "manualOp"
+  } else if (shift > tol) {
+    "leanR"
+  } else if (shift < -tol) {
+    "leanL"
+  } else {
+    "rect"
+  }
+  list(shape = shape, inset = if (shape == "rect") NA_real_ else abs(shift))
 }
 
 # Aggregate bounding box from all descendant <path> elements inside a <g>.
@@ -727,7 +773,7 @@ empty_nodes_tbl <- function() {
     id = character(), label = character(), shape = character(),
     svg_cx = numeric(), svg_cy = numeric(),
     svg_w = numeric(), svg_h = numeric(),
-    txt_w = numeric(), txt_h = numeric(),
+    txt_w = numeric(), txt_h = numeric(), svg_inset = numeric(),
     fill = character(), stroke = character(), color = character(), class = character()
   )
 }
