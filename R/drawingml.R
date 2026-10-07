@@ -7,7 +7,7 @@
 #   - Subgraph groups are nested <wpg:grpSp> elements (emitted first = behind)
 #   - stRect nodes use emit_st_rect_grpSp() (two stacked rect shapes)
 #   - Non-rectangular nodes (diamond, hexagon, parallelogram, trapezoid,
-#     extract, mergeTri, notchPent, collate, leanR, leanL) use
+#     manualOp, extract, mergeTri, notchPent, collate, leanR, leanL) use
 #     emit_node_grpSp(), which creates a wpg:grpSp containing:
 #       1. node_visual_wsp() — the shape fill/stroke, no text body
 #       2. node_text_overlay_wsp() — transparent rect carrying the label,
@@ -49,7 +49,7 @@
   winPane       = "flowChartInternalStorage",
   delay         = "flowChartDelay",
   manualInput   = "flowChartManualInput",
-  manualOp      = "flowChartManualOperation",
+  manualOp      = "trapezoid",        # uses flipV="1" in xfrm
   trapezoid     = "trapezoid",
   collate       = "flowChartCollate",
   display       = "flowChartDisplay",
@@ -698,6 +698,7 @@ emit_node <- function(nd, origin_x_px, origin_y_px, ctx, ctr) {
     "diamond", "hexagon",
     "parallelogram", "leanR", "leanL",
     "trapezoid",
+    "manualOp",   # inverted trapezoid
     "extract",    # triangle (flowChartExtract)
     "mergeTri",   # inverted triangle (flowChartMerge)
     "notchPent",  # pentagon (flowChartPreparation)
@@ -927,10 +928,18 @@ node_visual_wsp <- function(nd, w_emu, h_emu, ctx, ctr) {
 
   prst       <- .shape_map[shape_name]
   if (is.na(prst)) prst <- "rect"
-  geom_xml   <- paste0("<a:prstGeom prst=\"", prst, "\"><a:avLst/></a:prstGeom>")
+  geom_xml   <- paste0("<a:prstGeom prst=\"", prst, "\">", slant_avlst_xml(nd),
+                       "</a:prstGeom>")
 
-  # leanL (lean-l) uses the parallelogram preset mirrored horizontally
-  flip_attr <- if (identical(shape_name, "leanL")) " flipH=\"1\"" else ""
+  # leanL (lean-l) uses the parallelogram preset mirrored horizontally;
+  # manualOp (trap-t, wide top) uses the trapezoid preset mirrored vertically.
+  flip_attr <- if (identical(shape_name, "leanL")) {
+    " flipH=\"1\""
+  } else if (identical(shape_name, "manualOp")) {
+    " flipV=\"1\""
+  } else {
+    ""
+  }
 
   descr <- jsonlite::toJSON(list(
     v = "1", type = "node",
@@ -955,6 +964,20 @@ node_visual_wsp <- function(nd, w_emu, h_emu, ctx, ctr) {
       "<wps:bodyPr><a:noAutofit/></wps:bodyPr>",
     "</wps:wsp>"
   )
+}
+
+# <a:avLst> for the trapezoid and parallelogram presets. Both take one `adj`
+# guide: the horizontal run of the slanted sides, in 1/100000ths of the
+# shape's shorter side. Their default (25000) is half the slope mermaid
+# draws, so the SVG's own inset is used whenever the parser measured one.
+slant_avlst_xml <- function(nd) {
+  inset <- nd$svg_inset %||% NA_real_
+  short <- min(nd$svg_w %||% NA_real_, nd$svg_h %||% NA_real_)
+  slanted <- (nd$shape %||% "rect") %in%
+    c("trapezoid", "manualOp", "parallelogram", "leanR", "leanL")
+  if (!slanted || is.na(inset) || is.na(short) || short <= 0) return("<a:avLst/>")
+  adj <- as.integer(round(100000 * inset / short))
+  paste0("<a:avLst><a:gd name=\"adj\" fmla=\"val ", adj, "\"/></a:avLst>")
 }
 
 # Transparent rect text overlay wsp for diamond/hex group.

@@ -140,6 +140,58 @@ test_that("diamond prstGeom present for diamond shape", {
   expect_true(grepl('prst="diamond"', xml, fixed = TRUE))
 })
 
+test_that("trapezoid prstGeom present for trapezoid shape", {
+  d <- make_svg_data(n_nodes = 1L, add_edge = FALSE, shapes = "trapezoid")
+  xml <- build_diagram_xml(d)$xml
+  expect_true(grepl('prst="trapezoid"', xml, fixed = TRUE))
+  expect_false(grepl('prst="diamond"', xml, fixed = TRUE))
+})
+
+test_that("manualOp (alt trapezoid) is a vertically flipped trapezoid", {
+  d <- make_svg_data(n_nodes = 1L, add_edge = FALSE, shapes = "manualOp")
+  xml <- build_diagram_xml(d)$xml
+  expect_true(grepl('prst="trapezoid"', xml, fixed = TRUE))
+  expect_true(grepl('flipV="1"', xml, fixed = TRUE))
+  # The label sits in its own unflipped overlay shape
+  expect_true(grepl('name="mermaid:label:A"', xml, fixed = TRUE))
+
+  d <- make_svg_data(n_nodes = 1L, add_edge = FALSE, shapes = "trapezoid")
+  expect_false(grepl('flipV="1"', build_diagram_xml(d)$xml, fixed = TRUE))
+})
+
+test_that("slanted shapes take their slope from the SVG inset", {
+  # Fixture nodes are 80 x 35 px; an inset of half the height gives adj 50000
+  for (shape in c("trapezoid", "manualOp", "leanR", "leanL")) {
+    d <- make_svg_data(n_nodes = 1L, add_edge = FALSE, shapes = shape)
+    d$nodes$svg_inset <- 17.5
+    xml <- build_diagram_xml(d)$xml
+    expect_true(grepl('<a:gd name="adj" fmla="val 50000"/>', xml, fixed = TRUE),
+                info = shape)
+  }
+})
+
+test_that("preset default slope is kept when no inset was measured", {
+  d <- make_svg_data(n_nodes = 1L, add_edge = FALSE, shapes = "trapezoid")
+  expect_false(grepl('name="adj"', build_diagram_xml(d)$xml, fixed = TRUE))
+
+  # An inset on a shape without slanted sides is ignored
+  d <- make_svg_data(n_nodes = 1L, add_edge = FALSE, shapes = "diamond")
+  d$nodes$svg_inset <- 17.5
+  expect_false(grepl('name="adj"', build_diagram_xml(d)$xml, fixed = TRUE))
+})
+
+test_that("leanR and leanL use parallelogram, leanL mirrored", {
+  d <- make_svg_data(n_nodes = 1L, add_edge = FALSE, shapes = "leanR")
+  xml <- build_diagram_xml(d)$xml
+  expect_true(grepl('prst="parallelogram"', xml, fixed = TRUE))
+  expect_false(grepl('flipH="1"', xml, fixed = TRUE))
+
+  d <- make_svg_data(n_nodes = 1L, add_edge = FALSE, shapes = "leanL")
+  xml <- build_diagram_xml(d)$xml
+  expect_true(grepl('prst="parallelogram"', xml, fixed = TRUE))
+  expect_true(grepl('flipH="1"', xml, fixed = TRUE))
+})
+
 test_that("ellipse prstGeom present for ellipse shape", {
   d <- make_svg_data(n_nodes = 1L, add_edge = FALSE, shapes = "ellipse")
   xml <- build_diagram_xml(d)$xml
