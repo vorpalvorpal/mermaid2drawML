@@ -8,22 +8,23 @@ setup_mermaid2drawml(upgrade = FALSE)
 }
 \arguments{
 \item{upgrade}{Logical. If \code{TRUE}, passes \code{--prefer-online} to npm to
-force downloading fresh package versions. Default \code{FALSE}.}
+force fresh downloads. Default \code{FALSE}.}
 }
 \value{
-Invisibly returns the path to the node directory.
+Invisibly, the path to the Node directory.
 }
 \description{
-Downloads and installs the Node.js packages required to convert Mermaid
-diagrams to Word shapes. Must be run once after installing or updating the
-R package. Requires Node.js (>= 18) and npm to be on \code{PATH}.
+Installs the Node.js packages that render Mermaid diagrams. Run it once
+after installing or updating the R package. Node.js (>= 18) and npm must be
+on \code{PATH}.
 }
 \details{
-The following npm packages are installed into a user-local cache directory
+The packages, at the versions pinned in the package's \code{inst/node/package.json},
+are installed into a user-local directory
 (\code{tools::R_user_dir("mermaid2drawml", "data")}):
 \itemize{
-\item \verb{@mermaid-js/mermaid-cli} — renders Mermaid diagrams to SVG (bundles
-Chromium via Puppeteer, ~150 MB download)
-\item \verb{@mermaid-js/parser} — parses Mermaid syntax to a JSON AST
+\item \verb{@mermaid-js/mermaid-cli}, which brings Puppeteer and its Chromium
+(about 150 MB);
+\item \code{mermaid}, the diagram library itself.
 }
 }

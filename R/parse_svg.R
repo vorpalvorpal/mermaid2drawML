@@ -1,5 +1,11 @@
 # R/parse_svg.R
 #
+# TEMPORARY: this NA-tolerant `%||%` (it also treats a length-1 NA as missing)
+# is relied on by this file and R/drawingml.R. It goes when those files are
+# deleted; new code must use rlang's NULL-only `%||%`.
+`%||%` <- function(x, y) if (is.null(x) || (length(x) == 1L && is.na(x))) y else x
+
+#
 # Parses the SVG produced by mermaid-cli into two data structures used by
 # drawingml.R:
 #
@@ -577,7 +583,7 @@ element_geometry <- function(el, pos) {
     # Account for the element's own transform (e.g., cylinder label-containers
     # use translate(-rx, -cy_offset) to centre the path on the node origin).
     d     <- xml2::xml_attr(el, "d") %||% ""
-    bb    <- path_bbox(d)
+    bb <- legacy_path_bbox(d)
     # Detect cylinder: path uses arc commands
     shape <- if (grepl("[Aa]", d, perl = TRUE)) "cylinder" else "rect"
     list(shape  = shape,
@@ -642,7 +648,7 @@ group_element_bbox <- function(g_el) {
     p_off <- parse_translate(p_tf)
     d     <- xml2::xml_attr(p, "d") %||% ""
     if (!nzchar(d)) next
-    bb <- path_bbox(d)
+    bb <- legacy_path_bbox(d)
     if (bb$w <= 1 && bb$h <= 1) next   # skip degenerate paths
     hw <- bb$w / 2; hh <- bb$h / 2
     lx <- p_off[1] + bb$cx - hw;  rx <- p_off[1] + bb$cx + hw
@@ -1395,9 +1401,9 @@ cmds_to_drawingml <- function(cmds, origin_x, origin_y, scale) {
   paste0(parts, collapse = "")
 }
 
-# ── path_bbox (fallback for path-shaped nodes) ─────────────────────────────
+# ── legacy_path_bbox (renamed: geometry.R owns path_bbox; fallback for path-shaped nodes) ─────────────────────────────
 
-path_bbox <- function(d) {
+legacy_path_bbox <- function(d) {
   cmds <- parse_svg_path(d)
   pts  <- all_path_points(cmds)
   if (nrow(pts) == 0L) return(list(cx = 0, cy = 0, w = 60, h = 30))

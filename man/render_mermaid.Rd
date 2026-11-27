@@ -2,33 +2,30 @@
 % Please edit documentation in R/render.R
 \name{render_mermaid}
 \alias{render_mermaid}
-\title{Render a Mermaid diagram via the Node.js bridge}
+\title{Render a Mermaid diagram in a headless browser}
 \usage{
-render_mermaid(mermaid_code, timeout = 120L)
+render_mermaid(mermaid_code, timeout = 120L, config = NULL)
 }
 \arguments{
-\item{mermaid_code}{Character string of Mermaid diagram syntax.}
+\item{mermaid_code}{Character. Mermaid source; a vector of lines is joined
+with newlines.}
 
-\item{timeout}{Integer. Seconds to wait for the Node.js process. Puppeteer /
-Chromium can be slow on first call. Default \code{120}.}
+\item{timeout}{Seconds to wait for the Node process. Chrome can be slow to
+start the first time.}
+
+\item{config}{\code{NULL}, or a named list of Mermaid configuration (for example
+\code{list(theme = "forest")}), written as JSON and given to the bridge.}
 }
 \value{
-A named list with:
-\itemize{
-\item \code{ast}: parsed list from \verb{@mermaid-js/parser}, or
-\verb{list(_parseError = "<message>")} for unsupported diagram types
-\item \code{svg}: character string of the rendered SVG (always present)
-}
+An object of class \code{mermaid_render}: a list with \code{type}, \code{role},
+\code{viewBox} (numeric, length 4), \code{title}, \code{desc}, \code{svg}, \code{prims} (the drawn
+primitives), \code{db} (Mermaid's node and edge data, or \code{NULL}) and \code{mermaid}
+(the Mermaid version).
 }
 \description{
-Calls \code{mermaid_bridge.js}, which runs two Node.js operations in one process:
-\verb{@mermaid-js/mermaid-cli} renders the diagram to SVG (via Puppeteer/Chromium),
-and \verb{@mermaid-js/parser} attempts to parse the syntax to a JSON AST.
-}
-\details{
-The SVG is the authoritative output and drives all shape generation. The AST
-is collected opportunistically for future use (see \code{enrich_from_ast()} in
-\code{parse_svg.R}), but is not currently consulted during conversion. For
-flowcharts — the most common diagram type — \verb{@mermaid-js/parser} v0.3.x does
-not support the diagram type and returns a \verb{_parseError} sentinel instead.
+Runs the package's Node bridge (\code{inst/node/mermaid_bridge.js}), which has
+Mermaid draw the diagram in headless Chrome and reports what the browser
+drew: positioned shapes with computed paint, laid-out text and Mermaid's
+own node and edge data. The bridge is run from the installed package, so it
+always matches the R code reading its output.
 }

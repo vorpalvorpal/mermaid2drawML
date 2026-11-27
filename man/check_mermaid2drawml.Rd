@@ -7,9 +7,11 @@
 check_mermaid2drawml()
 }
 \value{
-Invisibly returns the path to \code{mermaid_bridge.js}.
+Invisibly, \code{TRUE}. Raises an error of class \code{mermaid2drawml_setup}
+when something is missing or out of date.
 }
 \description{
-Verifies that \code{setup_mermaid2drawml()} has been run and the required
-Node.js packages are available. Called automatically by rendering functions.
+Verifies that Node.js is available and that the installed Node packages are
+the versions pinned by this version of mermaid2drawml. Rendering functions
+call it for you; a passing check is remembered for the session.
 }

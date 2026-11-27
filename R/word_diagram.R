@@ -60,6 +60,8 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
                              ...) {
   orientation <- match.arg(orientation)
   margins     <- .normalise_margins(page_margins_in)
+  # render_mermaid() accepts a vector of lines; the old SVG parser wants one string.
+  mermaid_code <- paste(mermaid_code, collapse = "\n")
 
   rendered <- render_mermaid(mermaid_code, timeout = timeout)
   svg_data <- parse_mermaid_svg(rendered$svg, rendered$ast, source = mermaid_code)

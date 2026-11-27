@@ -1,7 +1,6 @@
 # R/render.R
-# Calls mermaid_bridge.js via processx to get the AST (JSON) and rendered SVG
-# for a Mermaid diagram. Both are returned together so Node.js / Puppeteer
-# only spin up once per diagram.
+# Runs inst/node/mermaid_bridge.js through processx and turns its JSON result
+# into a validated `mermaid_render` object.
 
 #' Find a Chrome-like browser for puppeteer
 #'
@@ -12,7 +11,7 @@
 #'
 #' @param candidates Character vector of paths to try, in order.
 #' @return A path, or `NA_character_` when none exists.
-#' @keywords internal
+#' @noRd
 .find_browser <- function(candidates = .browser_candidates()) {
   env <- Sys.getenv("PUPPETEER_EXECUTABLE_PATH", unset = "")
   if (nzchar(env) && file.exists(env)) return(env)
@@ -35,72 +34,125 @@
     unname(Sys.which(c("google-chrome", "chromium", "chromium-browser"))))
 }
 
-#' Render a Mermaid diagram via the Node.js bridge
+#' Render a Mermaid diagram in a headless browser
 #'
-#' Calls `mermaid_bridge.js`, which runs two Node.js operations in one process:
-#' `@mermaid-js/mermaid-cli` renders the diagram to SVG (via Puppeteer/Chromium),
-#' and `@mermaid-js/parser` attempts to parse the syntax to a JSON AST.
+#' Runs the package's Node bridge (`inst/node/mermaid_bridge.js`), which has
+#' Mermaid draw the diagram in headless Chrome and reports what the browser
+#' drew: positioned shapes with computed paint, laid-out text and Mermaid's
+#' own node and edge data. The bridge is run from the installed package, so it
+#' always matches the R code reading its output.
 #'
-#' The SVG is the authoritative output and drives all shape generation. The AST
-#' is collected opportunistically for future use (see `enrich_from_ast()` in
-#' `parse_svg.R`), but is not currently consulted during conversion. For
-#' flowcharts — the most common diagram type — `@mermaid-js/parser` v0.3.x does
-#' not support the diagram type and returns a `_parseError` sentinel instead.
-#'
-#' @param mermaid_code Character string of Mermaid diagram syntax.
-#' @param timeout Integer. Seconds to wait for the Node.js process. Puppeteer /
-#'   Chromium can be slow on first call. Default `120`.
-#' @return A named list with:
-#'   - `ast`: parsed list from `@mermaid-js/parser`, or
-#'     `list(_parseError = "<message>")` for unsupported diagram types
-#'   - `svg`: character string of the rendered SVG (always present)
+#' @param mermaid_code Character. Mermaid source; a vector of lines is joined
+#'   with newlines.
+#' @param timeout Seconds to wait for the Node process. Chrome can be slow to
+#'   start the first time.
+#' @param config `NULL`, or a named list of Mermaid configuration (for example
+#'   `list(theme = "forest")`), written as JSON and given to the bridge.
+#' @return An object of class `mermaid_render`: a list with `type`, `role`,
+#'   `viewBox` (numeric, length 4), `title`, `desc`, `svg`, `prims` (the drawn
+#'   primitives), `db` (Mermaid's node and edge data, or `NULL`) and `mermaid`
+#'   (the Mermaid version).
 #' @export
-render_mermaid <- function(mermaid_code, timeout = 120L) {
+render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL) {
   check_mermaid2drawml()
 
-  # Write diagram to a temp file (mermaid-cli expects a file path)
-  tmp_mmd <- tempfile(fileext = ".mmd")
-  on.exit(unlink(tmp_mmd), add = TRUE)
-  writeLines(mermaid_code, tmp_mmd, useBytes = FALSE)
+  mmd <- withr::local_tempfile(fileext = ".mmd")
+  writeLines(enc2utf8(paste(mermaid_code, collapse = "\n")), mmd, useBytes = TRUE)
 
-  bridge <- .bridge_js()
+  config_args <- if (!is.null(config)) {
+    cfg <- withr::local_tempfile(fileext = ".json")
+    jsonlite::write_json(config, cfg, auto_unbox = TRUE)
+    c("--config", cfg)
+  }
 
   # mermaid-cli fails with "Could not find Chrome" when puppeteer's own browser
-  # was never downloaded. Point it at an installed one when we can find one, and
-  # otherwise leave the environment alone (a puppeteer-cached Chrome still works).
-  browser  <- .find_browser()
-  run_args <- list(
-    command         = "node",
-    args            = c(bridge, tmp_mmd),
-    timeout         = timeout,
+  # was never downloaded, so point it at an installed one when there is one.
+  browser <- .find_browser()
+  result <- processx::run(
+    "node",
+    c(system.file("node", "mermaid_bridge.js", package = "mermaid2drawml"),
+      config_args, mmd),
+    env = c("current",
+            M2D_NODE_DIR = .node_dir(),
+            if (!is.na(browser)) c(PUPPETEER_EXECUTABLE_PATH = browser)),
+    timeout = timeout,
+    cleanup_tree = TRUE,
     error_on_status = FALSE
   )
-  if (!is.na(browser))
-    run_args$env <- c("current", PUPPETEER_EXECUTABLE_PATH = browser)
 
-  result <- do.call(processx::run, run_args)
-
-  if (result$status != 0L) {
-    rlang::abort(c(
-      "mermaid_bridge.js failed.",
-      i = if (nzchar(result$stderr)) result$stderr else "(no stderr output)",
-      i = "Check that setup_mermaid2drawml() has been run successfully."
-    ))
-  }
-
-  if (!nzchar(result$stdout)) {
-    rlang::abort("mermaid_bridge.js returned empty output.")
-  }
-
-  out <- tryCatch(
-    jsonlite::fromJSON(result$stdout, simplifyVector = FALSE),
-    error = function(e) rlang::abort(c("Failed to parse mermaid_bridge.js output as JSON.", i = e$message))
-  )
-
-  if (is.null(out$svg) || !nzchar(out$svg)) {
-    rlang::abort("mermaid_bridge.js returned no SVG content.")
-  }
-
-  out
+  as_mermaid_render(parse_bridge_output(result, timeout))
 }
 
+# The bridge prints a JSON array with one result per input; we send one input.
+# A Mermaid syntax error is a normal result (`ok: false`), not a failure.
+parse_bridge_output <- function(result, timeout) {
+  if (isTRUE(result$timeout)) {
+    cli::cli_abort(
+      "Rendering did not finish within {timeout} second{?s}.",
+      class = "mermaid2drawml_timeout"
+    )
+  }
+  if (!identical(as.integer(result$status), 0L)) {
+    cli::cli_abort(
+      c("The Mermaid bridge failed (exit status {result$status}).",
+        i = if (nzchar(result$stderr)) "{result$stderr}" else "No error output.",
+        i = "Check that {.run setup_mermaid2drawml()} has been run."),
+      class = "mermaid2drawml_render_error"
+    )
+  }
+  if (!nzchar(trimws(result$stdout))) {
+    cli::cli_abort("The Mermaid bridge returned no output.",
+                   class = "mermaid2drawml_render_error")
+  }
+  out <- tryCatch(
+    jsonlite::fromJSON(result$stdout, simplifyVector = FALSE),
+    error = function(e) {
+      cli::cli_abort(
+        c("The Mermaid bridge output is not valid JSON.", i = conditionMessage(e)),
+        class = "mermaid2drawml_render_error"
+      )
+    }
+  )
+  # A well-formed array holds exactly the one result we asked for.
+  first <- if (is.list(out) && is.null(names(out)) && length(out) > 0L) out[[1]] else out
+  if (is.list(first) && identical(first$ok, FALSE)) {
+    cli::cli_abort(
+      c("Mermaid could not render the diagram.", x = "{first$error$message}"),
+      class = "mermaid2drawml_syntax_error"
+    )
+  }
+  first
+}
+
+#' Read one bridge result from a JSON file
+#'
+#' For fixtures written by `dev/make-fixtures.mjs`, which omit `svg`.
+#' @param path Path to a JSON file holding one bridge result object.
+#' @noRd
+read_render <- function(path) {
+  as_mermaid_render(jsonlite::fromJSON(path, simplifyVector = FALSE))
+}
+
+#' Validate a parsed bridge result and give it the `mermaid_render` class
+#'
+#' The one constructor behind both `render_mermaid()` and `read_render()`.
+#' @param x A bridge result object parsed with `simplifyVector = FALSE`.
+#' @noRd
+as_mermaid_render <- function(x) {
+  fail <- function(what) {
+    cli::cli_abort(c("The Mermaid bridge result is malformed.", x = what),
+                   class = "mermaid2drawml_render_error")
+  }
+  if (!is.list(x)) fail("It is not a list.")
+  if (!is.list(x$prims)) fail("It has no {.field prims}.")
+  view_box <- suppressWarnings(as.numeric(unlist(x$viewBox)))
+  if (length(view_box) != 4L || anyNA(view_box)) {
+    fail("{.field viewBox} is not four numbers.")
+  }
+  structure(
+    list(type = x$type, role = x$role, viewBox = view_box,
+         title = x$title, desc = x$desc, svg = x$svg,
+         prims = x$prims, db = x$db, mermaid = x$mermaid),
+    class = "mermaid_render"
+  )
+}

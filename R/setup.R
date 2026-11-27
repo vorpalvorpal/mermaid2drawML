@@ -1,171 +1,162 @@
 # R/setup.R
-# Functions for managing the Node.js dependencies required by mermaid2drawml.
+# Managing the Node.js packages the bridge needs.
 #
-# The package ships inst/node/package.json and inst/node/mermaid_bridge.js.
-# setup_mermaid2drawml() copies these to a user-writable cache directory and
-# runs `npm install` there, downloading @mermaid-js/mermaid-cli (which bundles
-# Chromium via Puppeteer) and @mermaid-js/parser. This only needs to be run
-# once per machine (or after updating the package).
+# The package ships inst/node/package.json (pinned versions) and the bridge
+# script. setup_mermaid2drawml() copies only package.json to a user-local
+# directory and runs `npm install` there; the bridge itself is run from the
+# installed package, so it cannot go stale.
 
-# ── Internal path helpers ──────────────────────────────────────────────────
+# Passing checks are remembered per Node directory, so `node --version` is not
+# spawned for every diagram. Failures are never stored.
+.setup_cache <- rlang::env()
 
-#' Return the path to the user-local node directory
-#' @keywords internal
+#' The user-local directory holding `node_modules`
+#' @noRd
 .node_dir <- function() {
   tools::R_user_dir("mermaid2drawml", "data")
 }
 
-#' Return the path to mermaid_bridge.js in the node directory
-#' @keywords internal
-.bridge_js <- function() {
-  file.path(.node_dir(), "mermaid_bridge.js")
+#' The required Node packages: pinned version beside installed version
+#'
+#' The single source of truth for setup and check. Pins are read from the
+#' package's own `inst/node/package.json`.
+#' @return A tibble with `package`, `pinned`, `installed` (`NA` when absent)
+#'   and `path` (the package's directory under `node_modules`).
+#' @noRd
+.node_packages <- function(node_dir = .node_dir()) {
+  pj <- jsonlite::read_json(system.file("node", "package.json",
+                                        package = "mermaid2drawml"))
+  pinned <- unlist(pj$dependencies)
+  path <- file.path(node_dir, "node_modules", names(pinned))
+  tibble::tibble(
+    package = names(pinned),
+    pinned = unname(pinned),
+    installed = purrr::map_chr(path, installed_version),
+    path = path
+  )
 }
 
-#' Return the path to the locally installed mmdc binary
-#' @keywords internal
-.mmdc_bin <- function() {
-  # npm installs .bin symlinks here
-  file.path(.node_dir(), "node_modules", ".bin", "mmdc")
+installed_version <- function(dir) {
+  file <- file.path(dir, "package.json")
+  if (!file.exists(file)) return(NA_character_)
+  version <- jsonlite::read_json(file)$version
+  if (is.character(version)) version else NA_character_
 }
-
-# ── Setup ──────────────────────────────────────────────────────────────────
 
 #' Set up Node.js dependencies for mermaid2drawml
 #'
-#' Downloads and installs the Node.js packages required to convert Mermaid
-#' diagrams to Word shapes. Must be run once after installing or updating the
-#' R package. Requires Node.js (>= 18) and npm to be on `PATH`.
+#' Installs the Node.js packages that render Mermaid diagrams. Run it once
+#' after installing or updating the R package. Node.js (>= 18) and npm must be
+#' on `PATH`.
 #'
-#' The following npm packages are installed into a user-local cache directory
+#' The packages, at the versions pinned in the package's `inst/node/package.json`,
+#' are installed into a user-local directory
 #' (`tools::R_user_dir("mermaid2drawml", "data")`):
-#' - `@mermaid-js/mermaid-cli` — renders Mermaid diagrams to SVG (bundles
-#'   Chromium via Puppeteer, ~150 MB download)
-#' - `@mermaid-js/parser` — parses Mermaid syntax to a JSON AST
+#' - `@mermaid-js/mermaid-cli`, which brings Puppeteer and its Chromium
+#'   (about 150 MB);
+#' - `mermaid`, the diagram library itself.
 #'
 #' @param upgrade Logical. If `TRUE`, passes `--prefer-online` to npm to
-#'   force downloading fresh package versions. Default `FALSE`.
-#' @return Invisibly returns the path to the node directory.
+#'   force fresh downloads. Default `FALSE`.
+#' @return Invisibly, the path to the Node directory.
 #' @export
 setup_mermaid2drawml <- function(upgrade = FALSE) {
   check_node()
 
   node_dir <- .node_dir()
-  if (!dir.exists(node_dir)) dir.create(node_dir, recursive = TRUE)
+  dir.create(node_dir, recursive = TRUE, showWarnings = FALSE)
+  file.copy(system.file("node", "package.json", package = "mermaid2drawml"),
+            file.path(node_dir, "package.json"), overwrite = TRUE)
 
-  # Copy package.json and bridge script from the installed package
-  pkg_node <- system.file("node", package = "mermaid2drawml")
-  if (!nzchar(pkg_node)) {
-    # Development fallback: look relative to package root
-    pkg_node <- file.path(dirname(dirname(sys.frame(1)$filename %||% ".")), "inst", "node")
-  }
-
-  file.copy(file.path(pkg_node, "package.json"),       file.path(node_dir, "package.json"),       overwrite = TRUE)
-  file.copy(file.path(pkg_node, "mermaid_bridge.js"),  file.path(node_dir, "mermaid_bridge.js"),  overwrite = TRUE)
-
-  message("Installing Node.js dependencies (this may take a few minutes on first run)...")
-  message("  Installing to: ", node_dir)
-
-  npm_args <- c("install", "--prefix", node_dir)
-  if (upgrade) npm_args <- c(npm_args, "--prefer-online")
-
+  cli::cli_inform(c(
+    "Installing Node.js packages; the first run can take a few minutes.",
+    i = "Installing to {.path {node_dir}}"
+  ))
   result <- processx::run(
-    "npm", npm_args,
+    if (.Platform$OS.type == "windows") "npm.cmd" else "npm",
+    c("install", "--prefix", node_dir, if (upgrade) "--prefer-online"),
     echo = TRUE,
     error_on_status = FALSE
   )
-
-  if (result$status != 0L) {
-    rlang::abort(c(
-      "npm install failed.",
-      i = result$stderr,
-      i = "Make sure npm is installed and on PATH."
-    ))
+  if (!identical(as.integer(result$status), 0L)) {
+    cli::cli_abort(
+      c("{.code npm install} failed.",
+        i = if (nzchar(result$stderr)) "{result$stderr}",
+        i = "Make sure npm is installed and on {.envvar PATH}."),
+      class = "mermaid2drawml_setup"
+    )
   }
 
-  # Verify key package directories exist on disk.
-  # (@mermaid-js/parser is ESM-only so require() would give a false failure;
-  #  checking the file system is sufficient and more reliable.)
-  message("Verifying installation...")
-  parser_dir <- file.path(node_dir, "node_modules", "@mermaid-js", "parser")
-  mmdc_dir   <- file.path(node_dir, "node_modules", "@mermaid-js", "mermaid-cli")
-  bridge_ok  <- file.exists(file.path(node_dir, "mermaid_bridge.js"))
-
-  if (!dir.exists(parser_dir) || !dir.exists(mmdc_dir) || !bridge_ok) {
-    rlang::warn(c(
-      "Dependency verification had issues.",
-      i = if (!dir.exists(parser_dir)) paste("Missing:", parser_dir),
-      i = if (!dir.exists(mmdc_dir))   paste("Missing:", mmdc_dir),
-      i = if (!bridge_ok)              paste("Missing bridge script:", .bridge_js()),
-      i = "Try running setup_mermaid2drawml() again."
-    ))
+  problems <- setup_problems(.node_packages(node_dir))
+  if (length(problems) > 0L) {
+    cli::cli_warn(c("The installation is incomplete.", problems))
   } else {
-    message("mermaid2drawml is ready to use.")
+    cli::cli_inform(c(v = "mermaid2drawml is ready to use."))
   }
-
   invisible(node_dir)
 }
 
-# ── Checks ─────────────────────────────────────────────────────────────────
-
 #' Check that Node.js is available
-#' @keywords internal
+#' @noRd
 check_node <- function() {
   node <- Sys.which("node")
   if (!nzchar(node)) {
-    rlang::abort(c(
-      "Node.js is not found on PATH.",
-      i = "Install Node.js (>= 18) from https://nodejs.org and ensure it is on your PATH.",
-      i = "After installing Node.js, restart R and run setup_mermaid2drawml()."
-    ))
+    cli::cli_abort(
+      c("Node.js is not found on {.envvar PATH}.",
+        i = "Install Node.js (>= 18) from {.url https://nodejs.org}.",
+        i = "Then restart R and run {.run setup_mermaid2drawml()}."),
+      class = "mermaid2drawml_setup"
+    )
   }
 
-  # Check version >= 18
-  ver_raw <- tryCatch(
+  version <- tryCatch(
     processx::run("node", "--version", error_on_status = FALSE)$stdout,
     error = function(e) ""
   )
-  ver_match <- regmatches(ver_raw, regexpr("[0-9]+", ver_raw))
-  if (length(ver_match) > 0) {
-    major <- as.integer(ver_match[1])
-    if (!is.na(major) && major < 18L) {
-      rlang::warn(c(
-        paste0("Node.js ", trimws(ver_raw), " detected; version >= 18 is recommended."),
-        i = "Some features may not work correctly."
-      ))
-    }
+  major <- suppressWarnings(as.integer(stringr::str_extract(version, "[0-9]+")))
+  if (!is.na(major) && major < 18L) {
+    cli::cli_warn(c(
+      "Node.js {trimws(version)} detected; version 18 or later is recommended.",
+      i = "Some features may not work."
+    ))
   }
-
   invisible(node)
+}
+
+# One named bullet per package that is missing or at the wrong version.
+setup_problems <- function(packages) {
+  bad <- packages[is.na(packages$installed) | packages$installed != packages$pinned, ]
+  msgs <- ifelse(
+    is.na(bad$installed),
+    sprintf("%s is not installed (need %s).", bad$package, bad$pinned),
+    sprintf("%s is %s (need %s).", bad$package, bad$installed, bad$pinned)
+  )
+  stats::setNames(msgs, rep("x", length(msgs)))
 }
 
 #' Check that mermaid2drawml's Node.js setup is complete
 #'
-#' Verifies that `setup_mermaid2drawml()` has been run and the required
-#' Node.js packages are available. Called automatically by rendering functions.
+#' Verifies that Node.js is available and that the installed Node packages are
+#' the versions pinned by this version of mermaid2drawml. Rendering functions
+#' call it for you; a passing check is remembered for the session.
 #'
-#' @return Invisibly returns the path to `mermaid_bridge.js`.
+#' @return Invisibly, `TRUE`. Raises an error of class `mermaid2drawml_setup`
+#'   when something is missing or out of date.
 #' @export
 check_mermaid2drawml <- function() {
+  key <- normalizePath(.node_dir(), mustWork = FALSE)
+  if (isTRUE(.setup_cache[[key]])) return(invisible(TRUE))
+
   check_node()
-
-  bridge <- .bridge_js()
-  if (!file.exists(bridge)) {
-    rlang::abort(c(
-      "mermaid2drawml Node.js dependencies are not installed.",
-      i = "Run setup_mermaid2drawml() to install them."
-    ))
+  problems <- setup_problems(.node_packages())
+  if (length(problems) > 0L) {
+    cli::cli_abort(
+      c("The Node.js packages mermaid2drawml needs are not ready.",
+        problems,
+        i = "Run {.run setup_mermaid2drawml()} to install them."),
+      class = "mermaid2drawml_setup"
+    )
   }
-
-  parser_dir <- file.path(.node_dir(), "node_modules", "@mermaid-js", "parser")
-  if (!dir.exists(parser_dir)) {
-    rlang::abort(c(
-      "Node.js packages are missing.",
-      i = "Run setup_mermaid2drawml() to install them."
-    ))
-  }
-
-  invisible(bridge)
+  .setup_cache[[key]] <- TRUE
+  invisible(TRUE)
 }
-
-# ── Null-coalescing helper (base R) ────────────────────────────────────────
-`%||%` <- function(x, y) if (is.null(x) || (length(x) == 1L && is.na(x))) y else x
