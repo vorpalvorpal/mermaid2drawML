@@ -378,7 +378,7 @@ test_that("a shape painted after the text is not a candidate", {
 
 test_that("text over an open path or a line does not merge", {
   items <- generic_items(list(
-    prim_path("M0,0 L100,0 L100,50 L0,50", fill = "#FF0000"),
+    prim_path("M0,0 L100,0 L100,50 L0,50", fill = NULL),
     prim_text("open", x = 30, y = 15, w = 40, h = 20)
   ))
   expect_identical(texts_of(items)$label, "open")

@@ -276,7 +276,7 @@ expect_near <- function(object, expected, tol, info = NULL) {
   testthat::expect_equal(length(act), length(exp), info = info)
   diff <- if (length(act) == length(exp) && length(act) > 0L) max(abs(act - exp)) else Inf
   testthat::expect_lte(
-    diff, tol, info = info,
+    diff, tol,
     label = sprintf("largest difference between c(%s) and c(%s)",
                     paste(signif(act, 9), collapse = ", "),
                     paste(signif(exp, 9), collapse = ", ")))
