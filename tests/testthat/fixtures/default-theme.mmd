@@ -1,0 +1,5 @@
+flowchart TD
+    A([Start here]) --> B{Is anything getting away,<br/>or likely to?}
+    B -- Yes --> C[This may be a pollution incident.<br/>The notifier must be told now.]
+    B -- No --> D(Write down the times on the record sheet)
+    C --> D

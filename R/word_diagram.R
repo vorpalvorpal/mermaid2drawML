@@ -9,7 +9,8 @@
 #'
 #' @param mermaid_code A character string of Mermaid flowchart syntax.
 #' @param start_id Integer. Starting shape ID. Increment between diagrams in
-#'   the same document to avoid ID collisions. Default `1L`.
+#'   the same document to avoid ID collisions (see [body_add_mermaid()], which
+#'   picks a free one automatically). Default `1L`.
 #' @param timeout Integer. Seconds to allow for the Node.js render. Default 120.
 #' @param orientation Page orientation for the output document: `"portrait"`,
 #'   `"landscape"`, or `"auto"` (default). In auto mode the SVG aspect ratio is
@@ -30,8 +31,11 @@
 #'   11" × 8.5" landscape) minus the supplied margins. For A4 or custom sizes
 #'   pass `page_width_in` / `page_height_in` / `margin_in` directly via `...`.
 #' @param ... Additional arguments passed to [build_diagram_xml()], e.g.
-#'   `page_width_in`, `margin_in`, `default_stroke`. These take precedence over
-#'   values computed from `page_margins_in`.
+#'   `page_width_in`, `default_stroke`, `max_scale` (default `1`: small diagrams
+#'   are not enlarged; `Inf` fills the page), `font_scale`, `word_font_family`,
+#'   `align`. These take precedence over values computed from
+#'   `page_margins_in`. The drawing is placed in line with the text. Text below
+#'   7 pt signals a `mermaid2drawml_small_text` warning.
 #' @return A `mermaid_word_diagram` object with fields:
 #'   - `xml`: DrawingML XML string ready for [officer::body_add_xml()]
 #'   - `svg_data`: parsed SVG geometry (nodes, edges, viewbox tibbles)
@@ -128,7 +132,10 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
 #'
 #' @param doc An `rdocx` object from [officer::read_docx()].
 #' @param mermaid_code A character string of Mermaid flowchart syntax.
-#' @param start_id Integer. Starting shape ID. Default `1L`.
+#' @param start_id Integer. Starting shape ID. Default `NULL`, meaning one more
+#'   than the largest id already used by a `wp:docPr` or any `cNvPr` in the
+#'   document body (1 for an empty document), so repeated calls on one document
+#'   never produce duplicate ids. An explicit value is used as given.
 #' @param timeout Integer. Seconds for Node.js render. Default 120.
 #' @param orientation Page orientation: `"portrait"`, `"landscape"`, or
 #'   `"auto"` (default). See [mermaid_to_word()] for details.
@@ -136,7 +143,10 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
 #'   Default `1.3`.
 #' @param page_margins_in Page margins in inches. See [mermaid_to_word()] for
 #'   full details. Default `NULL` (use built-in defaults).
-#' @param ... Additional arguments passed to [build_diagram_xml()].
+#' @param ... Additional arguments passed to [build_diagram_xml()], e.g.
+#'   `max_scale` (default `1`: a diagram is drawn at natural size at most;
+#'   `Inf` fills the page), `font_scale`, `word_font_family`, `align`.
+#'   The drawing is placed in line with the text, in its own paragraph.
 #' @return The modified `rdocx` object (invisibly).
 #' @examples
 #' \dontrun{
@@ -148,13 +158,14 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
 #' print(doc, target = "output.docx")
 #' }
 #' @export
-body_add_mermaid <- function(doc, mermaid_code, start_id = 1L,
+body_add_mermaid <- function(doc, mermaid_code, start_id = NULL,
                               timeout         = 120L,
                               orientation     = c("auto", "portrait", "landscape"),
                               auto_aspect     = 1.3,
                               page_margins_in = NULL,
                               ...) {
   orientation <- match.arg(orientation)
+  start_id <- start_id %||% .next_free_shape_id(doc)
   diagram <- mermaid_to_word(mermaid_code,
                               start_id        = as.integer(start_id),
                               timeout         = timeout,
@@ -218,6 +229,23 @@ print.mermaid_word_diagram <- function(x, ...) {
 }
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
+#' One more than the largest shape id used in a document body
+#'
+#' Looks at `wp:docPr` and any `*:cNvPr` ids, so a diagram added next can use
+#' ids that clash with nothing already there.
+#' @param doc An `rdocx` object.
+#' @return An integer; 1 when the body holds no ids.
+#' @keywords internal
+.next_free_shape_id <- function(doc) {
+  ids <- xml2::xml_attr(
+    xml2::xml_find_all(officer::docx_body_xml(doc),
+                       "//*[local-name()='docPr' or local-name()='cNvPr']"),
+    "id")
+  ids <- suppressWarnings(as.integer(ids))
+  ids <- ids[!is.na(ids)]
+  if (length(ids) == 0L) 1L else max(ids) + 1L
+}
 
 #' Normalise the page_margins_in argument to a named list of four sides
 #' @keywords internal

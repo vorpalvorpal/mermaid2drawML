@@ -8,13 +8,17 @@ build_diagram_xml(
   svg_data,
   ast = NULL,
   start_id = 1L,
-  page_width_in = 6,
-  page_height_in = 8,
+  page_width_in = 6.27,
+  page_height_in = 9.69,
   margin_in = 1,
   default_fill = "FFFFFF",
   default_stroke = "5E504E",
   default_text_color = "000000",
-  stroke_width_pt = 1.5
+  stroke_width_pt = 1.5,
+  font_scale = 1,
+  word_font_family = NULL,
+  align = c("center", "left", "right"),
+  max_scale = 1
 )
 }
 \arguments{
@@ -24,11 +28,14 @@ build_diagram_xml(
 
 \item{start_id}{Integer. First shape ID; increment between diagrams.}
 
-\item{page_width_in}{Numeric. Usable content width in inches (default 6.0).}
+\item{page_width_in}{Numeric. Usable content width in inches (default 6.27,
+A4 portrait with 1" margins). The diagram is shrunk to fit it.}
 
-\item{page_height_in}{Numeric. Max diagram height in inches (default 8.0).}
+\item{page_height_in}{Numeric. Max diagram height in inches (default 9.69,
+A4 portrait with 1" margins).}
 
-\item{margin_in}{Numeric. Left/top margin offset in inches (default 1.0).}
+\item{margin_in}{Numeric. Retained for compatibility; the drawing is placed
+in line with the text, so it no longer positions the diagram.}
 
 \item{default_fill}{Default node fill colour (6-char hex). Default "FFFFFF".}
 
@@ -37,9 +44,36 @@ build_diagram_xml(
 \item{default_text_color}{Default text colour. Default "000000".}
 
 \item{stroke_width_pt}{Stroke width in points. Default 1.5.}
+
+\item{font_scale}{Numeric multiplier applied to the proportional font size
+before writing \verb{<w:sz>}. Default \code{1.0}. There is no readability floor: the
+text stays in proportion to its shapes, and a \code{mermaid2drawml_small_text}
+warning is signalled when it comes out below 7 pt (14 half-points). Use
+values < 1 (e.g. \code{0.85}) only if you set \code{word_font_family} to a font
+wider than the font the diagram was measured in.}
+
+\item{word_font_family}{Character. Font name for Word text runs (\verb{<w:rFonts>},
+all of ascii, hAnsi, eastAsia and cs). Default \code{NULL}, which uses the first
+family of the \code{font-family} the SVG declares on its root (the mermaid theme
+\code{fontFamily}, e.g. \code{"Segoe UI"}; \code{"Trebuchet MS"} with no init block).
+That is the font Chromium measured the labels in, so the shapes fit.
+Override with e.g. \code{"Myriad Pro"}; combine with \code{font_scale < 1.0} if the
+override font is wider than the measured one.}
+
+\item{align}{Character. Horizontal alignment of the drawing: \code{"center"}
+(default), \code{"left"}, or \code{"right"}. It becomes the \code{w:jc} of the paragraph
+that holds the (in-line) drawing.}
+
+\item{max_scale}{Numeric. Largest size, as a multiple of natural size (9525
+EMU per SVG pixel, i.e. 96 dpi, so 16 px text is 12 pt), the diagram may be
+drawn at. Default \code{1}: a small diagram is never enlarged, while a large one
+is still shrunk to fit the page. Use \code{Inf} to fill the page (posters).}
 }
 \value{
-Named list: xml (character) and next_id (integer).
+Named list: xml (character) and next_id (integer). \code{xml} is a
+\verb{<w:p>} whose single run holds a \code{wp:inline} drawing (no anchor, no
+absolute position), with explicit single line spacing so a template's
+exact line spacing cannot clip it.
 }
 \description{
 Build DrawingML XML from parsed mermaid SVG geometry

@@ -4,18 +4,42 @@
 \alias{body_add_mermaid}
 \title{Add a Mermaid diagram to a Word document}
 \usage{
-body_add_mermaid(doc, mermaid_code, start_id = 1L, timeout = 120L, ...)
+body_add_mermaid(
+  doc,
+  mermaid_code,
+  start_id = NULL,
+  timeout = 120L,
+  orientation = c("auto", "portrait", "landscape"),
+  auto_aspect = 1.3,
+  page_margins_in = NULL,
+  ...
+)
 }
 \arguments{
 \item{doc}{An \code{rdocx} object from \code{\link[officer:read_docx]{officer::read_docx()}}.}
 
 \item{mermaid_code}{A character string of Mermaid flowchart syntax.}
 
-\item{start_id}{Integer. Starting shape ID. Default \code{1L}.}
+\item{start_id}{Integer. Starting shape ID. Default \code{NULL}, meaning one more
+than the largest id already used by a \code{wp:docPr} or any \code{cNvPr} in the
+document body (1 for an empty document), so repeated calls on one document
+never produce duplicate ids. An explicit value is used as given.}
 
 \item{timeout}{Integer. Seconds for Node.js render. Default 120.}
 
-\item{...}{Additional arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}.}
+\item{orientation}{Page orientation: \code{"portrait"}, \code{"landscape"}, or
+\code{"auto"} (default). See \code{\link[=mermaid_to_word]{mermaid_to_word()}} for details.}
+
+\item{auto_aspect}{Numeric. Aspect-ratio threshold for auto orientation.
+Default \code{1.3}.}
+
+\item{page_margins_in}{Page margins in inches. See \code{\link[=mermaid_to_word]{mermaid_to_word()}} for
+full details. Default \code{NULL} (use built-in defaults).}
+
+\item{...}{Additional arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}, e.g.
+\code{max_scale} (default \code{1}: a diagram is drawn at natural size at most;
+\code{Inf} fills the page), \code{font_scale}, \code{word_font_family}, \code{align}.
+The drawing is placed in line with the text, in its own paragraph.}
 }
 \value{
 The modified \code{rdocx} object (invisibly).
@@ -24,11 +48,18 @@ The modified \code{rdocx} object (invisibly).
 A convenience wrapper around \code{\link[=mermaid_to_word]{mermaid_to_word()}} that parses, renders, and
 inserts a Mermaid diagram directly into an \code{rdocx} document object.
 }
+\details{
+When the resolved orientation is landscape, or when \code{page_margins_in} is
+supplied, a matching section-break property is appended so that Word uses
+the correct page layout.
+}
 \examples{
 \dontrun{
 library(officer)
+# Auto orientation, narrow margins
 doc <- read_docx() |>
-  body_add_mermaid("flowchart TB\n  A[Start] --> B[End]")
+  body_add_mermaid("flowchart LR\n  A[Start] --> B[End]",
+                   page_margins_in = 0.5)
 print(doc, target = "output.docx")
 }
 }

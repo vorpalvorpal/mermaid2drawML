@@ -167,71 +167,18 @@ extract_svg_style <- function(doc) {
   }
 
   # Font family -------------------------------------------------------------
-  # Mermaid uses TWO font declarations that serve different purposes:
-  #
-  #   1. font-family: <value>  on #my-svg and .label — set by themeVariables
-  #      fontFamily (e.g. "Myriad Pro").  Applies to <text> elements such as
-  #      subgraph labels, but NOT to <foreignObject> node-label content.
-  #
-  #   2. --mermaid-font-family: "trebuchet ms",verdana,...  set via :root{} —
-  #      a CSS custom property that mermaid's internal CSS uses for the actual
-  #      <foreignObject> text (node labels).  This is always the mermaid
-  #      built-in stack and is NOT affected by themeVariables.fontFamily.
-  #
-  # Node sizes (foreignObject dimensions) are therefore measured using the
-  # --mermaid-font-family stack, NOT the declared font-family.  We extract
-  # BOTH so callers can present the correct measurement font to Word (avoiding
-  # metric mismatches) while still exposing the user's declared font if needed.
-  .font_name_map <- c(
-    "trebuchet ms"   = "Trebuchet MS",
-    "verdana"        = "Verdana",
-    "arial"          = "Arial",
-    "helvetica"      = "Helvetica",
-    "helvetica neue" = "Helvetica Neue",
-    "times new roman"= "Times New Roman",
-    "georgia"        = "Georgia",
-    "courier new"    = "Courier New",
-    "courier"        = "Courier",
-    "tahoma"         = "Tahoma",
-    "calibri"        = "Calibri",
-    "segoe ui"       = "Segoe UI"
-  )
-
-  .first_font <- function(raw) {
-    first <- trimws(strsplit(raw, ",")[[1]][1])
-    first <- tolower(gsub('"', '', first, fixed = TRUE))
-    first <- trimws(first)
-    if (!nzchar(first) || first %in% c("sans-serif","serif","monospace","inherit"))
-      return(NA_character_)
-    if (first %in% names(.font_name_map)) return(.font_name_map[[first]])
-    # Title-case unknown font names (e.g. "open sans" -> "Open Sans")
-    gsub("(^|\\s)(\\S)", "\\1\\U\\2", first, perl = TRUE)
-  }
-
-  # 1. Declared font (themeVariables.fontFamily) — from font-family: <value>
-  declared_font_family <- "Trebuchet MS"
-  m <- regexec('font-family\\s*:\\s*([^;}\\n]+)', style_text, perl = TRUE)
-  hit <- regmatches(style_text, m)[[1]]
-  if (length(hit) == 2L) {
-    f <- .first_font(hit[2])
-    if (!is.na(f)) declared_font_family <- f
-  }
-
-  # 2. Measurement font (--mermaid-font-family CSS variable) — always Trebuchet MS
-  #    unless mermaid changes its built-in default.  This is the font that
-  #    Chromium actually used to measure node label widths.
-  measurement_font_family <- "Trebuchet MS"
-  m2 <- regexec('--mermaid-font-family\\s*:\\s*([^;}\\n]+)',
-                style_text, perl = TRUE)
-  hit2 <- regmatches(style_text, m2)[[1]]
-  if (length(hit2) == 2L) {
-    f <- .first_font(hit2[2])
-    if (!is.na(f)) measurement_font_family <- f
-  }
-
-  # font_family is the measurement font: this is what should go in <w:rFonts>
-  # to ensure Word text fits the SVG-measured node boxes without clipping.
-  font_family <- measurement_font_family
+  # Chromium measures node labels in the font declared on the svg root rule,
+  # `#<svgid>{font-family:Segoe UI;...}` (mermaid's theme fontFamily; with no
+  # init block it is the built-in "trebuchet ms",verdana,... stack). The
+  # `--mermaid-font-family` variable sits in `#<svgid> :root{}`, which matches
+  # nothing, so it is only a fallback for SVGs that declare no font-family.
+  root_id   <- xml2::xml_attr(xml2::xml_root(doc), "id")
+  root_font <- .css_font_family(
+    .css_decl(.root_rule_body(style_text, root_id), "font-family"))
+  var_font  <- .css_font_family(
+    .css_decl(style_text, "--mermaid-font-family", lookbehind = FALSE))
+  font_family          <- root_font %||% var_font %||% "Trebuchet MS"
+  declared_font_family <- font_family
 
   # Edge line colour --------------------------------------------------------
   # Mermaid emits:  .flowchart-link { stroke: #RRGGBB; fill: none; }
@@ -270,35 +217,93 @@ extract_svg_style <- function(doc) {
 
   # Cluster default fill / stroke -----------------------------------------
   # Mermaid emits:  .cluster rect { fill: #ffffde; stroke: #aaaa33; ... }
-  cluster_fill   <- "FFFFDE"
-  cluster_stroke <- "AAAA33"
-  m <- regmatches(style_text,
-    regexpr("\\.cluster rect\\s*\\{([^}]*?)\\}", style_text, perl = TRUE))
-  if (length(m) > 0L) {
-    blk <- m[[1]]
-    mf <- regmatches(blk,
-      regexpr("fill:\\s*#([0-9A-Fa-f]{6})", blk, perl = TRUE))
-    if (length(mf) > 0L) {
-      col <- regmatches(mf[[1]], regexpr("[0-9A-Fa-f]{6}$", mf[[1]], perl = TRUE))
-      if (length(col) > 0L) cluster_fill <- toupper(col)
-    }
-    ms <- regmatches(blk,
-      regexpr("stroke:\\s*#([0-9A-Fa-f]{6})", blk, perl = TRUE))
-    if (length(ms) > 0L) {
-      col <- regmatches(ms[[1]], regexpr("[0-9A-Fa-f]{6}$", ms[[1]], perl = TRUE))
-      if (length(col) > 0L) cluster_stroke <- toupper(col)
-    }
-  }
+  # (base-theme colours are often hsl(...)).
+  cl_blk         <- .css_rule_body(style_text, "\\.cluster rect")
+  cluster_fill   <- .css_colour_prop(cl_blk, "fill")   %||% "FFFFDE"
+  cluster_stroke <- .css_colour_prop(cl_blk, "stroke") %||% "AAAA33"
+  if (is.na(cluster_fill))   cluster_fill   <- "FFFFDE"
+  if (is.na(cluster_stroke)) cluster_stroke <- "AAAA33"
+
+  # Theme colours of nodes without a classDef --------------------------------
+  # Mermaid emits:  .node rect,.node circle,.node ellipse,.node polygon,
+  #                 .node path { fill: #ECECFF; stroke: #9370DB; ... }
+  nd_blk      <- .css_rule_body(style_text, "\\.node rect")
+  node_fill   <- .css_colour_prop(nd_blk, "fill")   %||% NA_character_
+  node_stroke <- .css_colour_prop(nd_blk, "stroke") %||% NA_character_
 
   list(font_size_px          = font_size_px,
-       font_family            = font_family,           # measurement font (--mermaid-font-family)
-       declared_font_family   = declared_font_family,  # themeVariables fontFamily
+       font_family            = font_family,           # font Chromium measured labels in
+       declared_font_family   = declared_font_family,
        edge_stroke            = edge_stroke,
        edge_sw_px             = edge_sw_px,
        edge_label_bg          = edge_label_bg,
        cluster_fill          = cluster_fill,
        cluster_stroke         = cluster_stroke,
+       node_fill              = node_fill,
+       node_stroke            = node_stroke,
        class_styles           = extract_class_styles(style_text))
+}
+
+.font_name_map <- c(
+  "trebuchet ms"   = "Trebuchet MS",
+  "verdana"        = "Verdana",
+  "arial"          = "Arial",
+  "helvetica"      = "Helvetica",
+  "helvetica neue" = "Helvetica Neue",
+  "times new roman"= "Times New Roman",
+  "georgia"        = "Georgia",
+  "courier new"    = "Courier New",
+  "courier"        = "Courier",
+  "tahoma"         = "Tahoma",
+  "calibri"        = "Calibri",
+  "segoe ui"       = "Segoe UI"
+)
+
+# First usable family of a CSS font-family value, unquoted, with known names
+# in canonical case. NULL when there is none.
+.css_font_family <- function(raw) {
+  if (length(raw) == 0L || is.na(raw[1])) return(NULL)
+  fams <- trimws(gsub("[\"']", "", strsplit(raw, ",")[[1]]))
+  fams <- fams[nzchar(fams) &
+                 !tolower(fams) %in% c("sans-serif", "serif", "monospace", "inherit")]
+  if (length(fams) == 0L) return(NULL)
+  first <- tolower(fams[1])
+  if (first %in% names(.font_name_map)) return(.font_name_map[[first]])
+  gsub("(^|\\s)(\\S)", "\\1\\U\\2", first, perl = TRUE)
+}
+
+# Declarations of the svg root rule `#<id>{...}` (whole style text if no id).
+.root_rule_body <- function(style_text, root_id) {
+  if (is.na(root_id) || !nzchar(root_id)) return(style_text)
+  pat <- paste0("#", gsub("([^[:alnum:]_-])", "\\\\\\1", root_id),
+                "\\s*\\{([^}]*)\\}")
+  m <- regmatches(style_text, regexec(pat, style_text, perl = TRUE))[[1]]
+  if (length(m) == 2L) m[2] else ""
+}
+
+# Value of the first `prop: value` declaration in a block. By default `prop`
+# must not be the tail of a longer name (so `font-family` skips
+# `--mermaid-font-family`).
+.css_decl <- function(block, prop, lookbehind = TRUE) {
+  if (is.null(block) || is.na(block) || !nzchar(block)) return(NA_character_)
+  m <- regmatches(block, regexec(
+    paste0(if (lookbehind) "(?<![-\\w])" else "", prop, "\\s*:\\s*([^;}]+)"),
+    block, perl = TRUE))[[1]]
+  if (length(m) == 2L) trimws(m[2]) else NA_character_
+}
+
+# Body of the first rule whose selector (list) contains `selector_re`.
+.css_rule_body <- function(style_text, selector_re) {
+  m <- regmatches(style_text, regexec(
+    paste0(selector_re, "[^{]*\\{([^}]*)\\}"), style_text, perl = TRUE))[[1]]
+  if (length(m) == 2L) m[2] else ""
+}
+
+# Colour property of a block as 6-char hex; NA when absent or unparseable.
+.css_colour_prop <- function(block, prop) {
+  v <- .css_decl(block, prop)
+  if (is.na(v)) return(NA_character_)
+  parse_css_colour(.strip_important(v))
 }
 
 # Parse per-class CSS rules from the SVG <style> block and return a named list
@@ -362,7 +367,9 @@ extract_nodes <- function(doc, ast) {
     txt_w    = vapply(rows, `[[`, numeric(1),   "txt_w"),
     txt_h    = vapply(rows, `[[`, numeric(1),   "txt_h"),
     svg_inset = vapply(rows, `[[`, numeric(1),  "svg_inset"),
+    svg_rx   = vapply(rows, `[[`, numeric(1),   "svg_rx"),
     fill     = vapply(rows, `[[`, character(1), "fill"),
+    fill_none = vapply(rows, `[[`, logical(1),  "fill_none"),
     stroke   = vapply(rows, `[[`, character(1), "stroke"),
     color    = vapply(rows, `[[`, character(1), "color"),
     class    = vapply(rows, `[[`, character(1), "class")
@@ -418,7 +425,9 @@ parse_one_node <- function(g) {
     txt_w   = txtdim$w,   # foreignObject width  (NA if not found)
     txt_h   = txtdim$h,   # foreignObject height (NA if not found)
     svg_inset = geom$svg_inset %||% NA_real_,  # slant run (NA unless slanted)
+    svg_rx  = geom$svg_rx %||% NA_real_,       # corner radius (NA unless rounded)
     fill    = fill   %||% NA_character_,
+    fill_none = identical(fill_css(shape_el, g), "transparent"),
     stroke  = stroke %||% NA_character_,
     color   = color  %||% NA_character_,
     class   = user_class
@@ -500,8 +509,10 @@ element_geometry <- function(el, pos) {
     # x/y are relative to translate point (which is the centre in mermaid)
     svg_cx <- cx          # already the centre
     svg_cy <- cy
-    shape  <- if (!is.na(rx) && rx > 1) "roundRect" else "rect"
-    list(shape = shape, svg_cx = svg_cx, svg_cy = svg_cy, svg_w = w, svg_h = h)
+    rounded <- !is.na(rx) && rx > 1
+    shape  <- if (rounded) "roundRect" else "rect"
+    list(shape = shape, svg_cx = svg_cx, svg_cy = svg_cy, svg_w = w, svg_h = h,
+         svg_rx = if (rounded) rx else NA_real_)
 
   } else if (tag == "polygon") {
     pts  <- parse_polygon_points(xml2::xml_attr(el, "points") %||% "")
@@ -549,14 +560,17 @@ element_geometry <- function(el, pos) {
       "rect"
     }
     bb     <- group_element_bbox(el)
+    # A stadium (outer-path) is a pill: its corner radius is half its height.
+    pill   <- identical(shape, "roundRect")
     if (is.null(bb))
       return(list(shape = shape, svg_cx = cx + el_off[1], svg_cy = cy + el_off[2],
-                  svg_w = 60, svg_h = 30))
+                  svg_w = 60, svg_h = 30, svg_rx = if (pill) 15 else NA_real_))
     list(shape  = shape,
          svg_cx = cx + el_off[1] + bb$cx,
          svg_cy = cy + el_off[2] + bb$cy,
          svg_w  = bb$w,
-         svg_h  = bb$h)
+         svg_h  = bb$h,
+         svg_rx = if (pill) bb$h / 2 else NA_real_)
 
   } else {
     # path (or other element): bbox via path parser.
@@ -666,7 +680,11 @@ extract_node_label <- function(g) {
     # before stripping all remaining HTML/SVG tags.
     raw <- as.character(fo)
     raw <- gsub("<br\\s*/?>", "\n", raw, perl = TRUE, ignore.case = TRUE)
-    raw <- gsub("<[^>]+>", "", raw)
+    # Keep inline bold / italic as <b> / <i> (strong -> b, em -> i); every
+    # other tag is dropped.
+    raw <- gsub("<(/?)(?:b|strong)\\b[^>]*>", "<\\1b>", raw, perl = TRUE, ignore.case = TRUE)
+    raw <- gsub("<(/?)(?:i|em)\\b[^>]*>",     "<\\1i>", raw, perl = TRUE, ignore.case = TRUE)
+    raw <- gsub("<(?!/?[bi]>)[^>]+>", "", raw, perl = TRUE)
     # Trim each line, drop blank lines, then rejoin with \n
     lines <- strsplit(raw, "\n", fixed = TRUE)[[1]]
     lines <- trimws(lines)
@@ -733,8 +751,10 @@ extract_text_color <- function(shape_el, g) {
 # values like "transparent !important" or "#700017 !important" parse cleanly.
 .strip_important <- function(x) trimws(sub("\\s*!important.*$", "", x, perl = TRUE))
 
-extract_fill <- function(shape_el, g) {
-  # Mermaid v11 puts fill on child path elements inside the label-container <g>
+# The raw CSS fill value (without `!important`) of a shape, looked up on the
+# styled child path (mermaid v11 groups), the shape, then the node group.
+# NA when none of them declares a fill.
+fill_css <- function(shape_el, g) {
   candidates <- if (xml2::xml_name(shape_el) == "g") {
     child_path <- xml2::xml_find_first(shape_el, ".//path[@style]")
     if (!inherits(child_path, "xml_missing"))
@@ -749,12 +769,18 @@ extract_fill <- function(shape_el, g) {
     m <- regmatches(style, regexpr("(?:^|;)\\s*fill:\\s*([^;]+)", style, perl = TRUE))
     if (length(m) > 0L) {
       col <- .strip_important(sub(".*fill:\\s*", "", m))
-      if (nzchar(col)) return(parse_css_colour(col))   # "transparent" → NA via named_colours
+      if (nzchar(col)) return(tolower(col))
     }
     fa <- .strip_important(xml2::xml_attr(el, "fill") %||% "")
-    if (nzchar(fa)) return(parse_css_colour(fa))
+    if (nzchar(fa)) return(tolower(fa))
   }
   NA_character_
+}
+
+extract_fill <- function(shape_el, g) {
+  col <- fill_css(shape_el, g)
+  if (is.na(col)) return(NA_character_)
+  parse_css_colour(col)   # "transparent" -> NA via named_colours
 }
 
 extract_stroke <- function(shape_el, g) {
@@ -815,7 +841,8 @@ empty_nodes_tbl <- function() {
     svg_cx = numeric(), svg_cy = numeric(),
     svg_w = numeric(), svg_h = numeric(),
     txt_w = numeric(), txt_h = numeric(), svg_inset = numeric(),
-    fill = character(), stroke = character(), color = character(), class = character()
+    svg_rx = numeric(),
+    fill = character(), fill_none = logical(), stroke = character(), color = character(), class = character()
   )
 }
 
@@ -892,7 +919,10 @@ extract_subgraphs <- function(doc, style) {
 
     # Label text from cluster-label child
     label_g <- xml2::xml_find_first(g, ".//*[contains(@class,'cluster-label')]")
-    label   <- if (!inherits(label_g, "xml_missing")) trimws(xml2::xml_text(label_g)) else ""
+    label   <- if (!inherits(label_g, "xml_missing")) {
+      lab <- extract_node_label(label_g)
+      if (nzchar(lab)) lab else trimws(xml2::xml_text(label_g))
+    } else ""
 
     known       <- c("cluster", "subSpace")
     user_class  <- setdiff(classes, known)
@@ -1032,7 +1062,9 @@ parse_one_edge <- function(path_el, doc, nodes_tbl) {
   # "thick" must match edge-thickness-thick specifically (not edge-thickness-normal).
   cl    <- xml2::xml_attr(path_el, "class") %||% ""
   style <- xml2::xml_attr(path_el, "style") %||% ""
-  line_type <- if (grepl("edge-pattern-dashed|edge-pattern-dotted", cl) ||
+  line_type <- if (grepl("edge-thickness-invisible", cl, fixed = TRUE)) {
+    "invisible"   # A ~~~ B: layout-only link, mermaid does not draw it
+  } else if (grepl("edge-pattern-dashed|edge-pattern-dotted", cl) ||
                    grepl("stroke-dasharray", style, ignore.case = TRUE)) {
     "dashed"
   } else if (grepl("edge-thickness-thick\\b", cl)) {
