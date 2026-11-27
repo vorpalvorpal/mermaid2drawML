@@ -1,0 +1,11 @@
+flowchart TB
+  subgraph S1[Group one]
+    A[Start here] --> B{Decide<br/>now}
+  end
+  B -- yes --> C[(Database)]
+  B -. no .-> D>Asym]
+  E["`A **bold** word`"] ==> C
+  F["2 * 3 * 4 __init__"] ~~~ A
+  style A fill:lightblue,stroke:#f00,stroke-width:4px
+  style D fill:none
+  style E fill:#ff000080

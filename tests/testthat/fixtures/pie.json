@@ -1,0 +1,27 @@
+{
+"ok": true,
+"bridge": 2,
+"mermaid": "11.13.0",
+"type": "pie",
+"role": "pie",
+"viewBox": [0,0,591.328,450],
+"title": null,
+"desc": null,
+"prims": [
+{"i":0,"kind":"ellipse","tag":"circle","id":"","cls":"pieOuterCircle","data":{},"anc":[],"bbox":[39,39,372,372],"m":[1,0,0,1,225,225],"geom":{"cx":0,"cy":0,"rx":186,"ry":186},"fill":null,"fill_a":0,"fill_approx":false,"stroke":"#000000","stroke_a":1,"stroke_w":2,"dash":null,"marker_start":null,"marker_end":null},
+{"i":1,"kind":"path","tag":"path","id":"","cls":"pieCircle","data":{},"anc":[],"bbox":[40,40,370,370],"m":[1,0,0,1,225,225],"geom":{"d":"M0,-185A185,185,0,1,1,-177.899,-50.763L0,0Z"},"fill":"#ECECFF","fill_a":0.7,"fill_approx":false,"stroke":"#000000","stroke_a":0.7,"stroke_w":2,"dash":null,"marker_start":null,"marker_end":null},
+{"i":2,"kind":"path","tag":"path","id":"","cls":"pieCircle","data":{},"anc":[],"bbox":[47.101,43.468,177.899,181.532],"m":[1,0,0,1,225,225],"geom":{"d":"M-177.899,-50.763A185,185,0,0,1,-35.652,-181.532L0,0Z"},"fill":"#FFFFDE","fill_a":0.7,"fill_approx":false,"stroke":"#000000","stroke_a":0.7,"stroke_w":2,"dash":null,"marker_start":null,"marker_end":null},
+{"i":3,"kind":"path","tag":"path","id":"","cls":"pieCircle","data":{},"anc":[],"bbox":[189.348,40,35.652,185],"m":[1,0,0,1,225,225],"geom":{"d":"M-35.652,-181.532A185,185,0,0,1,0,-185L0,0Z"},"fill":"#B5FF20","fill_a":0.7,"fill_approx":false,"stroke":"#000000","stroke_a":0.7,"stroke_w":2,"dash":null,"marker_start":null,"marker_end":null},
+{"i":4,"kind":"text","tag":"text","id":"","cls":"slice","data":{},"anc":[],"bbox":[294.55,319.757,28.047,20],"html":false,"anchor":"middle","rot":0,"rows":[{"bbox":[294.55,319.757,28.047,20],"runs":[{"t":"79%","bold":false,"italic":false,"underline":false,"color":"#333333","size":17,"family":"\"trebuchet ms\", verdana, arial, sans-serif","font":"trebuchet ms"}]}]},
+{"i":5,"kind":"text","tag":"text","id":"","cls":"slice","data":{},"anc":[],"bbox":[117.073,106.854,28.047,20],"html":false,"anchor":"middle","rot":0,"rows":[{"bbox":[117.073,106.854,28.047,20],"runs":[{"t":"17%","bold":false,"italic":false,"underline":false,"color":"#333333","size":17,"family":"\"trebuchet ms\", verdana, arial, sans-serif","font":"trebuchet ms"}]}]},
+{"i":6,"kind":"text","tag":"text","id":"","cls":"slice","data":{},"anc":[],"bbox":[202.005,70.902,19.125,20],"html":false,"anchor":"middle","rot":0,"rows":[{"bbox":[202.005,70.902,19.125,20],"runs":[{"t":"3%","bold":false,"italic":false,"underline":false,"color":"#333333","size":17,"family":"\"trebuchet ms\", verdana, arial, sans-serif","font":"trebuchet ms"}]}]},
+{"i":7,"kind":"text","tag":"text","id":"","cls":"pieTitleText","data":{},"anc":[],"bbox":[201.781,2,46.438,29],"html":false,"anchor":"middle","rot":0,"rows":[{"bbox":[201.781,2,46.438,29],"runs":[{"t":"Pets","bold":false,"italic":false,"underline":false,"color":"#000000","size":25,"family":"\"trebuchet ms\", verdana, arial, sans-serif","font":"trebuchet ms"}]}]},
+{"i":8,"kind":"rect","tag":"rect","id":"","cls":"","data":{},"anc":[{"id":"","cls":"legend"}],"bbox":[441,192,18,18],"m":[1,0,0,1,441,192],"geom":{"x":0,"y":0,"w":18,"h":18,"rx":0,"ry":0},"fill":"#ECECFF","fill_a":1,"fill_approx":false,"stroke":"#ECECFF","stroke_a":1,"stroke_w":1,"dash":null,"marker_start":null,"marker_end":null},
+{"i":9,"kind":"text","tag":"text","id":"","cls":"","data":{},"anc":[{"id":"","cls":"legend"}],"bbox":[463,190,79.328,20],"html":false,"anchor":"start","rot":0,"rows":[{"bbox":[463,190,79.328,20],"runs":[{"t":"Dogs [386]","bold":false,"italic":false,"underline":false,"color":"#000000","size":17,"family":"\"trebuchet ms\", verdana, arial, sans-serif","font":"trebuchet ms"}]}]},
+{"i":10,"kind":"rect","tag":"rect","id":"","cls":"","data":{},"anc":[{"id":"","cls":"legend"}],"bbox":[441,214,18,18],"m":[1,0,0,1,441,214],"geom":{"x":0,"y":0,"w":18,"h":18,"rx":0,"ry":0},"fill":"#FFFFDE","fill_a":1,"fill_approx":false,"stroke":"#FFFFDE","stroke_a":1,"stroke_w":1,"dash":null,"marker_start":null,"marker_end":null},
+{"i":11,"kind":"text","tag":"text","id":"","cls":"","data":{},"anc":[{"id":"","cls":"legend"}],"bbox":[463,212,68.172,20],"html":false,"anchor":"start","rot":0,"rows":[{"bbox":[463,212,68.172,20],"runs":[{"t":"Cats [85]","bold":false,"italic":false,"underline":false,"color":"#000000","size":17,"family":"\"trebuchet ms\", verdana, arial, sans-serif","font":"trebuchet ms"}]}]},
+{"i":12,"kind":"rect","tag":"rect","id":"","cls":"","data":{},"anc":[{"id":"","cls":"legend"}],"bbox":[441,236,18,18],"m":[1,0,0,1,441,236],"geom":{"x":0,"y":0,"w":18,"h":18,"rx":0,"ry":0},"fill":"#B5FF20","fill_a":1,"fill_approx":false,"stroke":"#B5FF20","stroke_a":1,"stroke_w":1,"dash":null,"marker_start":null,"marker_end":null},
+{"i":13,"kind":"text","tag":"text","id":"","cls":"","data":{},"anc":[{"id":"","cls":"legend"}],"bbox":[463,234,67.891,20],"html":false,"anchor":"start","rot":0,"rows":[{"bbox":[463,234,67.891,20],"runs":[{"t":"Rats [15]","bold":false,"italic":false,"underline":false,"color":"#000000","size":17,"family":"\"trebuchet ms\", verdana, arial, sans-serif","font":"trebuchet ms"}]}]}
+],
+"db": null
+}

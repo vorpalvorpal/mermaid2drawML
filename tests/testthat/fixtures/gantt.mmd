@@ -1,0 +1,11 @@
+gantt
+    title Plan
+    dateFormat YYYY-MM-DD
+    axisFormat %d/%m
+    section A
+    Done task :done, a1, 2024-01-01, 5d
+    Active :active, a2, after a1, 4d
+    Crit :crit, a3, after a2, 3d
+    section B
+    Future :b1, after a3, 5d
+    Milestone :milestone, m1, 2024-01-25, 0d

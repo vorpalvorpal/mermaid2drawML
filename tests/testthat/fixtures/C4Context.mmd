@@ -1,0 +1,10 @@
+C4Context
+    title System Context
+    Person(c, "Customer", "A user")
+    System(s, "Banking System", "Core")
+    System_Ext(m, "Mail", "Email")
+    Enterprise_Boundary(b0, "Bank") {
+        System(x, "Other")
+    }
+    Rel(c, s, "Uses")
+    Rel(s, m, "Sends", "SMTP")

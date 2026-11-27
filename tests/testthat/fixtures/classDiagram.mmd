@@ -1,0 +1,18 @@
+classDiagram
+    class Animal {
+        <<abstract>>
+        +String name
+        -int age
+        +eat() void
+        +sleep()$ void
+    }
+    class Dog
+    class Cat
+    Animal <|-- Dog
+    Animal <|-- Cat
+    Dog "1" --> "*" Bone : owns
+    Dog *-- Tail
+    Dog o-- Collar
+    Cat ..> Mouse : chases
+    Cat ..|> Pet
+    note for Dog "Good boy"

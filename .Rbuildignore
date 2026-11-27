@@ -4,3 +4,5 @@
 ^examples$
 ^\.claude$
 ^LICENSE\.md$
+^tests/node$
+^dev$

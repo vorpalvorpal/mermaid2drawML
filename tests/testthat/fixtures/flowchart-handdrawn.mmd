@@ -1,0 +1,13 @@
+---
+config:
+  look: handDrawn
+  theme: neutral
+---
+flowchart LR
+    A[Start] --> B{Is it?}
+    B -->|Yes| C([OK])
+    B -->|No| D[(Db)]
+    C --> E((End))
+    subgraph G
+      D --> F[[Sub]]
+    end

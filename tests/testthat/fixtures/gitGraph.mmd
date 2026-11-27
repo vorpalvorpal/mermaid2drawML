@@ -1,0 +1,19 @@
+gitGraph
+    commit
+    commit id: "two"
+    branch develop
+    checkout develop
+    commit id: "dev1"
+    commit tag: "v1"
+    checkout main
+    merge develop
+    commit type: HIGHLIGHT
+    branch feat
+    commit type: REVERSE
+    checkout main
+    commit id: "m3"
+    branch other
+    checkout other
+    commit id: "o1"
+    checkout main
+    cherry-pick id: "o1"

@@ -1,0 +1,68 @@
+flowchart TB
+    n1[Rect] --> n2(Rounded)
+    n2 --> n3([Stadium])
+    n3 --> n4[[Subroutine]]
+    n4 --> n5[(Database)]
+    n5 --> n6((Circle))
+    n6 --> n7>Asymmetric]
+    n7 --> n8{Diamond}
+    n8 --> n9{{Hexagon}}
+    n9 --> n10[/Parallelogram/]
+    n10 --> n11[\Alt para\]
+    n11 --> n12[/Trapezoid\]
+    n12 --> n13[\Trap alt/]
+    n13 --> n14(((Double circle)))
+    v1@{ shape: cloud, label: "Cloud" }
+    v2@{ shape: doc, label: "Document" }
+    v3@{ shape: bolt, label: "Bolt" }
+    v4@{ shape: cyl, label: "Cyl" }
+    v5@{ shape: tag-rect, label: "Tag" }
+    v6@{ shape: lean-r, label: "Lean" }
+    v7@{ shape: fork, label: "Fork" }
+    v8@{ shape: hourglass, label: "Hg" }
+    v9@{ shape: sl-rect, label: "Sloped" }
+    v10@{ shape: docs, label: "Docs" }
+    n14 --> v1
+    v1 --> v2 --> v3 --> v4 --> v5 --> v6 --> v7 --> v8 --> v9 --> v10
+    a --> b
+    a --- c
+    a -.-> d
+    a ==> e
+    a --o f
+    a --x g
+    a <--> h
+    a ~~~ i
+    a ---> j
+    a ----> k
+    a -.- l
+    a -- text --> m
+    a -->|label| n
+    a -. dotted .-> o
+    a == thick ==> p
+    subgraph S1 [Outer]
+      direction LR
+      s1 --> s2
+      subgraph S2 [Inner]
+        direction TB
+        s3 --> s4
+      end
+      s2 --> s3
+    end
+    classDef red fill:#f99,stroke:#900,stroke-width:3px,color:#000
+    class a red
+    b:::red
+    style c fill:#9f9,stroke:#090,stroke-dasharray: 5 5
+    linkStyle 0 stroke:#f00,stroke-width:4px
+    md["`**bold** _italic_
+    second line`"]
+    br["line1<br/>line2"]
+    uni["Unicode: é ü 日本語 #9731; #35;"]
+    md --> br --> uni
+    click a "https://example.com" "tip" _blank
+    click b href "https://example.org"
+    ic@{ icon: "fa:user", form: "square", label: "Icon", pos: "b", h: 40 }
+    im@{ img: "https://mermaid.js.org/favicon.svg", label: "Image", pos: "t", w: 60, h: 60, constraint: "on" }
+    ic e1@--> im
+    e1@{ animate: true }
+    uni e2@==> ic
+    e2@{ animate: true, curve: linear }

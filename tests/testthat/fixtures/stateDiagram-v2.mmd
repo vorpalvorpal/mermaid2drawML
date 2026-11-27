@@ -1,0 +1,17 @@
+stateDiagram-v2
+    [*] --> Still
+    Still --> [*]
+    Still --> Moving : push
+    Moving --> Still
+    Moving --> Crash
+    Crash --> [*]
+    state Active {
+        [*] --> Idle
+        Idle --> Busy
+        --
+        [*] --> Other
+    }
+    state choice <<choice>>
+    Moving --> choice
+    choice --> Still : if x
+    note right of Still : a note
