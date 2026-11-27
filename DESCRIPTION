@@ -19,6 +19,7 @@ Imports:
     jsonlite (>= 1.8.0),
     tibble (>= 3.2.0),
     rlang (>= 1.1.0),
+    cli,
     tools
 Suggests:
     testthat (>= 3.0.0),

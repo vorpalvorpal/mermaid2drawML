@@ -50,8 +50,12 @@ inserts a Mermaid diagram directly into an \code{rdocx} document object.
 }
 \details{
 When the resolved orientation is landscape, or when \code{page_margins_in} is
-supplied, a matching section-break property is appended so that Word uses
-the correct page layout.
+supplied, the diagram gets its own section. Anything already in the document
+is first closed in a section that keeps the document's existing layout, so
+earlier pages are not reformatted; the diagram then follows, and a section
+break carrying its page size and margins ends it. No leading break is added
+when the diagram is the first thing in the document. A portrait diagram with
+default margins adds no section properties.
 }
 \examples{
 \dontrun{

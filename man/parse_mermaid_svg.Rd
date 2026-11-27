@@ -4,7 +4,7 @@
 \alias{parse_mermaid_svg}
 \title{Parse a mermaid SVG into node and edge geometry tables}
 \usage{
-parse_mermaid_svg(svg, ast = NULL)
+parse_mermaid_svg(svg, ast = NULL, source = NULL)
 }
 \arguments{
 \item{svg}{Character string containing a complete SVG document as produced

@@ -24,9 +24,10 @@ picks a free one automatically). Default \code{1L}.}
 \item{timeout}{Integer. Seconds to allow for the Node.js render. Default 120.}
 
 \item{orientation}{Page orientation for the output document: \code{"portrait"},
-\code{"landscape"}, or \code{"auto"} (default). In auto mode the SVG aspect ratio is
-compared against \code{auto_aspect}; if width/height exceeds that threshold the
-diagram is treated as landscape.}
+\code{"landscape"}, or \code{"auto"} (default). Auto chooses landscape only when the
+diagram is wider than \code{auto_aspect} (width/height) \strong{and} would not fit
+the portrait content width at its drawn size (its width at 96 px per inch,
+times \code{max_scale}). A small wide diagram therefore stays portrait.}
 
 \item{auto_aspect}{Numeric. Aspect-ratio threshold used when
 \code{orientation = "auto"}. Diagrams wider than this ratio are landscape.
@@ -35,13 +36,13 @@ Default \code{1.3}.}
 \item{page_margins_in}{Page margins in inches. Controls how much of the
 physical page is available for the diagram. Can be:
 \itemize{
-\item \code{NULL} (default): use built-in defaults (1" margins, US Letter).
+\item \code{NULL} (default): use built-in defaults (1" margins, A4).
 \item A single number: the same margin on all four sides.
 \item A named numeric vector with any subset of \code{top}, \code{bottom}, \code{left},
 \code{right}; unspecified sides default to \code{1}.
 }
-The content area is computed from a US Letter page (8.5" × 11" portrait,
-11" × 8.5" landscape) minus the supplied margins. For A4 or custom sizes
+The content area is computed from an A4 page (8.27" × 11.69" portrait,
+11.69" × 8.27" landscape) minus the supplied margins. For other sizes
 pass \code{page_width_in} / \code{page_height_in} / \code{margin_in} directly via \code{...}.}
 
 \item{...}{Additional arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}, e.g.
