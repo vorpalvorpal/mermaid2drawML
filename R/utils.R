@@ -46,6 +46,13 @@ parse_css_colour <- function(css) {
   css <- trimws(tolower(css))
   if (css %in% names(.named_colours)) return(.named_colours[[css]])
   if (grepl("^#", css)) return(hex_to_drawingml(css))
+  if (grepl("^hsla?\\(", css)) {
+    nums <- suppressWarnings(as.numeric(
+      regmatches(css, gregexpr("-?[0-9]*\\.?[0-9]+", css))[[1]]))
+    if (length(nums) >= 3 && !anyNA(nums[1:3]))
+      return(hsl_to_hex(nums[1], nums[2], nums[3]))
+    return(NA_character_)
+  }
   if (grepl("^rgb", css)) {
     nums <- suppressWarnings(as.integer(
       regmatches(css, gregexpr("[0-9]+", css))[[1]]
@@ -53,6 +60,19 @@ parse_css_colour <- function(css) {
     if (length(nums) >= 3) return(toupper(sprintf("%02X%02X%02X", nums[1], nums[2], nums[3])))
   }
   NA_character_
+}
+
+# h in degrees, s and l in percent -> 6-char hex (CSS Color 4 algorithm).
+hsl_to_hex <- function(h, s, l) {
+  s <- min(max(s, 0), 100) / 100
+  l <- min(max(l, 0), 100) / 100
+  a <- s * min(l, 1 - l)
+  chan <- function(n) {
+    k <- (n + (h %% 360) / 30) %% 12
+    l - a * max(-1, min(k - 3, 9 - k, 1))
+  }
+  rgb <- round(255 * vapply(c(0, 8, 4), chan, numeric(1)))
+  sprintf("%02X%02X%02X", as.integer(rgb[1]), as.integer(rgb[2]), as.integer(rgb[3]))
 }
 
 # Label cleaning ---------------------------------------------------------------

@@ -293,25 +293,27 @@ test_that("start_id parameter is respected", {
 
 # ── Round-trip metadata ────────────────────────────────────────────────────
 
-test_that("descr attribute contains JSON type field", {
+test_that("the drawing's docPr carries a descr attribute", {
+  # Since 7c08402 the round-trip metadata lives only on wp:docPr; shapes carry
+  # no descr because wps:wsp has no nvSpPr wrapper to hold it.
   xml <- build_diagram_xml(make_svg_data())$xml
-  # JSON is XML-escaped inside the descr attribute
-  expect_true(grepl("&quot;type&quot;", xml, fixed = TRUE))
+  expect_true(grepl('<wp:docPr id="[0-9]+" name="mermaid:diagram" descr=', xml))
 })
 
-test_that("node metadata includes id and shape fields", {
+test_that("each node shape is named after its mermaid id", {
   xml <- build_diagram_xml(make_svg_data(n_nodes = 1L, add_edge = FALSE))$xml
-  expect_true(grepl("&quot;id&quot;",    xml, fixed = TRUE))
-  expect_true(grepl("&quot;shape&quot;", xml, fixed = TRUE))
+  expect_true(grepl('name="mermaid:node:', xml, fixed = TRUE))
 })
 
 # ── EMU positions are positive ─────────────────────────────────────────────
 
-test_that("posOffset values are positive integers", {
+test_that("the in-line drawing has a positive extent and no absolute offsets", {
+  # F2: the drawing is wp:inline now, so there is no wp:posOffset to check.
   xml <- build_diagram_xml(make_svg_data())$xml
-  m   <- gregexpr("<wp:posOffset>([0-9]+)</wp:posOffset>", xml, perl = TRUE)
-  offsets <- regmatches(xml, m)[[1]]
-  expect_true(length(offsets) >= 2L)
+  expect_false(grepl("posOffset", xml, fixed = TRUE))
+  m <- regmatches(xml, regexec('<wp:extent cx="([0-9]+)" cy="([0-9]+)"/>', xml))[[1]]
+  expect_equal(length(m), 3L)
+  expect_true(all(as.integer(m[2:3]) > 0L))
 })
 
 # ── Empty diagram ──────────────────────────────────────────────────────────
@@ -330,5 +332,6 @@ test_that("empty diagram returns valid XML w:p", {
             viewbox = c(0, 0, 200, 100))
   r <- build_diagram_xml(d)
   expect_no_error(xml2::read_xml(r$xml))
-  expect_equal(r$next_id, 1L)
+  # start_id (1) goes to the drawing's docPr, so the next free id is 2
+  expect_equal(r$next_id, 2L)
 })

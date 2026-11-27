@@ -4,18 +4,52 @@
 \alias{mermaid_to_word}
 \title{Convert a Mermaid diagram to a Word-embeddable object}
 \usage{
-mermaid_to_word(mermaid_code, start_id = 1L, timeout = 120L, ...)
+mermaid_to_word(
+  mermaid_code,
+  start_id = 1L,
+  timeout = 120L,
+  orientation = c("auto", "portrait", "landscape"),
+  auto_aspect = 1.3,
+  page_margins_in = NULL,
+  ...
+)
 }
 \arguments{
 \item{mermaid_code}{A character string of Mermaid flowchart syntax.}
 
 \item{start_id}{Integer. Starting shape ID. Increment between diagrams in
-the same document to avoid ID collisions. Default \code{1L}.}
+the same document to avoid ID collisions (see \code{\link[=body_add_mermaid]{body_add_mermaid()}}, which
+picks a free one automatically). Default \code{1L}.}
 
 \item{timeout}{Integer. Seconds to allow for the Node.js render. Default 120.}
 
+\item{orientation}{Page orientation for the output document: \code{"portrait"},
+\code{"landscape"}, or \code{"auto"} (default). In auto mode the SVG aspect ratio is
+compared against \code{auto_aspect}; if width/height exceeds that threshold the
+diagram is treated as landscape.}
+
+\item{auto_aspect}{Numeric. Aspect-ratio threshold used when
+\code{orientation = "auto"}. Diagrams wider than this ratio are landscape.
+Default \code{1.3}.}
+
+\item{page_margins_in}{Page margins in inches. Controls how much of the
+physical page is available for the diagram. Can be:
+\itemize{
+\item \code{NULL} (default): use built-in defaults (1" margins, US Letter).
+\item A single number: the same margin on all four sides.
+\item A named numeric vector with any subset of \code{top}, \code{bottom}, \code{left},
+\code{right}; unspecified sides default to \code{1}.
+}
+The content area is computed from a US Letter page (8.5" × 11" portrait,
+11" × 8.5" landscape) minus the supplied margins. For A4 or custom sizes
+pass \code{page_width_in} / \code{page_height_in} / \code{margin_in} directly via \code{...}.}
+
 \item{...}{Additional arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}, e.g.
-\code{page_width_in}, \code{margin_in}, \code{default_stroke}.}
+\code{page_width_in}, \code{default_stroke}, \code{max_scale} (default \code{1}: small diagrams
+are not enlarged; \code{Inf} fills the page), \code{font_scale}, \code{word_font_family},
+\code{align}. These take precedence over values computed from
+\code{page_margins_in}. The drawing is placed in line with the text. Text below
+7 pt signals a \code{mermaid2drawml_small_text} warning.}
 }
 \value{
 A \code{mermaid_word_diagram} object with fields:
@@ -26,6 +60,9 @@ A \code{mermaid_word_diagram} object with fields:
 indicates an unsupported diagram type (e.g. flowchart). Currently unused
 during conversion — see \code{enrich_from_ast()} in \code{parse_svg.R}.
 \item \code{next_id}: next available shape ID for chaining documents
+\item \code{orientation}: resolved orientation (\code{"portrait"} or \code{"landscape"})
+\item \code{margins}: normalised margin list, or \code{NULL} if \code{page_margins_in} was
+not supplied
 }
 }
 \description{

@@ -1,0 +1,8 @@
+%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'Segoe UI', 'primaryColor': '#FFFFFF', 'primaryBorderColor': '#005490'}}}%%
+flowchart TD
+    A([Start here]) --> B[Call <b>000</b> now<br/>then <i>wait</i> for **help**]
+    B -- "<b>Yes</b>, go" --> C((Circle))
+    A ~~~ C
+    B --> D(Rounded)
+    classDef plain fill:transparent,stroke:#000000
+    class D plain

@@ -3,6 +3,38 @@
 # for a Mermaid diagram. Both are returned together so Node.js / Puppeteer
 # only spin up once per diagram.
 
+#' Find a Chrome-like browser for puppeteer
+#'
+#' Returns `PUPPETEER_EXECUTABLE_PATH` if it is set and exists; otherwise the
+#' first existing candidate among the usual Chrome, Chromium and Edge locations
+#' on macOS, Windows and Linux (`google-chrome`, `chromium`, `chromium-browser`
+#' on `PATH`).
+#'
+#' @param candidates Character vector of paths to try, in order.
+#' @return A path, or `NA_character_` when none exists.
+#' @keywords internal
+.find_browser <- function(candidates = .browser_candidates()) {
+  env <- Sys.getenv("PUPPETEER_EXECUTABLE_PATH", unset = "")
+  if (nzchar(env) && file.exists(env)) return(env)
+  found <- Filter(function(p) !is.na(p) && nzchar(p) && file.exists(p), candidates)
+  if (length(found) > 0L) found[[1]] else NA_character_
+}
+
+.browser_candidates <- function() {
+  win_dirs <- Filter(nzchar, c(Sys.getenv("ProgramFiles"),
+                               Sys.getenv("ProgramFiles(x86)"),
+                               "C:/Program Files", "C:/Program Files (x86)"))
+  win <- as.vector(outer(unique(win_dirs),
+    c("Google/Chrome/Application/chrome.exe",
+      "Microsoft/Edge/Application/msedge.exe"),
+    file.path))
+  c("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+    win,
+    unname(Sys.which(c("google-chrome", "chromium", "chromium-browser"))))
+}
+
 #' Render a Mermaid diagram via the Node.js bridge
 #'
 #' Calls `mermaid_bridge.js`, which runs two Node.js operations in one process:
@@ -33,12 +65,20 @@ render_mermaid <- function(mermaid_code, timeout = 120L) {
 
   bridge <- .bridge_js()
 
-  result <- processx::run(
+  # mermaid-cli fails with "Could not find Chrome" when puppeteer's own browser
+  # was never downloaded. Point it at an installed one when we can find one, and
+  # otherwise leave the environment alone (a puppeteer-cached Chrome still works).
+  browser  <- .find_browser()
+  run_args <- list(
     command         = "node",
     args            = c(bridge, tmp_mmd),
     timeout         = timeout,
     error_on_status = FALSE
   )
+  if (!is.na(browser))
+    run_args$env <- c("current", PUPPETEER_EXECUTABLE_PATH = browser)
+
+  result <- do.call(processx::run, run_args)
 
   if (result$status != 0L) {
     rlang::abort(c(

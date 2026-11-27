@@ -1,0 +1,10 @@
+%%{init: {'theme': 'base', 'themeVariables': {'fontFamily': 'Segoe UI', 'fontSize': '16px', 'primaryColor': '#FFFFFF', 'primaryBorderColor': '#005490', 'lineColor': '#5E504E'}}}%%
+flowchart TD
+    S([Start]) --> A
+    subgraph Calls[Phone the authorities in order]
+        A[1. EPA 131 555] --> B[2. Council 02 4780 5000]
+        B --> C[3. SafeWork NSW 13 10 50]
+    end
+    C --> E([Tell the Manager])
+    classDef blue fill:#005490,stroke:#005490,color:#FFFFFF
+    class S,E blue

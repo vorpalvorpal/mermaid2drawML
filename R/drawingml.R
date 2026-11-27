@@ -3,10 +3,12 @@
 # Converts parsed SVG geometry (from parse_svg.R) into DrawingML XML
 # (<w:p>…</w:p>) ready for officer::body_add_xml().
 #
-# Architecture: single <wp:anchor> containing a <wpg:wgp> super-group.
+# Architecture: a single in-line <wp:inline> drawing containing a <wpg:wgp>
+# super-group (placed in the text flow, so it never overlaps body text).
 #   - Subgraph groups are nested <wpg:grpSp> elements (emitted first = behind)
 #   - stRect nodes use emit_st_rect_grpSp() (two stacked rect shapes)
-#   - Non-rectangular nodes (diamond, hexagon, parallelogram, trapezoid,
+#   - Non-rectangular nodes (diamond, ellipse/circle, roundRect/stadium, hexagon,
+#     parallelogram, trapezoid,
 #     manualOp, extract, mergeTri, notchPent, collate, leanR, leanL) use
 #     emit_node_grpSp(), which creates a wpg:grpSp containing:
 #       1. node_visual_wsp() — the shape fill/stroke, no text body
@@ -14,7 +16,8 @@
 #          sized to the SVG foreignObject dimensions (fixes text clipping)
 #   - All other nodes (rect, roundRect, ellipse, cylinder, flowChart*,
 #     cloud, doc, docs, bolt, bang, brace*, text, etc.) use node_wsp()
-#   - Edges are <wps:wsp> children with custom geometry
+#   - Edges are <wps:wsp> children with custom geometry; invisible links
+#     (A ~~~ B) are not drawn
 #
 # Key OOXML rules for nested groups (MS-ODRAWXML §2.16.1):
 #   - Top-level wpg:wgp (directly in a:graphicData): NO wpg:cNvPr
@@ -100,16 +103,19 @@
 # Build the <w:rPr> XML for a labelled text run.
 # Using a single helper ensures font, size, and colour are consistent
 # everywhere and makes it easy to change them in one place.
-text_rpr_xml <- function(text_col, ctx, bold = FALSE, font_size_hp = NULL) {
+text_rpr_xml <- function(text_col, ctx, bold = FALSE, font_size_hp = NULL,
+                         italic = FALSE) {
   hp <- font_size_hp %||% ctx$font_size_hp
   paste0(
     "<w:rPr>",
       "<w:rFonts",
         " w:ascii=\"",    ctx$font_family, "\"",
         " w:hAnsi=\"",    ctx$font_family, "\"",
+        " w:eastAsia=\"", ctx$font_family, "\"",
         " w:cs=\"",       ctx$font_family, "\"",
       "/>",
       if (bold) "<w:b/>" else "",
+      if (italic) "<w:i/>" else "",
       "<w:color w:val=\"", text_col, "\"/>",
       "<w:sz w:val=\"",    hp, "\"/>",
       "<w:szCs w:val=\"",  hp, "\"/>",
@@ -117,27 +123,106 @@ text_rpr_xml <- function(text_col, ctx, bold = FALSE, font_size_hp = NULL) {
   )
 }
 
-# Build <w:txbxContent> XML for a label that may contain <br> line breaks.
-# Splits on <br>, <br/>, <br />, or \n before stripping HTML so that each
-# logical line becomes its own <w:p> inside the text box.
+# Decode the entities a label may carry.
+.decode_entities <- function(x) {
+  x <- gsub("&lt;",   "<", x, fixed = TRUE)
+  x <- gsub("&gt;",   ">", x, fixed = TRUE)
+  x <- gsub("&nbsp;", " ", x, fixed = TRUE)
+  x <- gsub("&#160;", " ", x, fixed = TRUE)
+  gsub("&amp;", "&", x, fixed = TRUE)
+}
+
+# Split a label into lines of formatted runs.
+#
+# `raw_label` may contain <br> / newlines (line breaks) and <b> / <i> (also
+# <strong> / <em>; any other tag is dropped). Bold / italic state is carried
+# across line breaks, so `<b>one<br/>two</b>` gives two bold lines.
+# Returns a list with one element per line: a data frame of runs
+# (text, bold, italic). A blank line has a single run with empty text.
+parse_label_runs <- function(raw_label) {
+  x <- raw_label %||% ""
+  x <- gsub("<(/?)(?:b|strong)\\b[^>]*>", "<\\1b>", x, perl = TRUE, ignore.case = TRUE)
+  x <- gsub("<(/?)(?:i|em)\\b[^>]*>",     "<\\1i>", x, perl = TRUE, ignore.case = TRUE)
+  x <- gsub("<(?!/?[bi]>|br\\s*/?>)[^>]+>", "", x, perl = TRUE, ignore.case = TRUE)
+  x <- gsub("\\*\\*(.+?)\\*\\*", "\\1", x, perl = TRUE)
+  x <- gsub("__(.+?)__",         "\\1", x, perl = TRUE)
+  x <- gsub("\\*(.+?)\\*",       "\\1", x, perl = TRUE)
+
+  tok_re <- "<br\\s*/?>|\\n|</?[bi]>"
+  texts  <- regmatches(x, gregexpr(tok_re, x, perl = TRUE, ignore.case = TRUE),
+                       invert = TRUE)[[1]]
+  toks   <- tolower(regmatches(x, gregexpr(tok_re, x, perl = TRUE,
+                                           ignore.case = TRUE))[[1]])
+
+  # Token that precedes each text piece; the state after it applies to that piece.
+  prev  <- c("", toks)
+  carry <- function(on, off) {
+    step <- function(st, t) if (t == on) TRUE else if (t == off) FALSE else st
+    Reduce(step, prev, accumulate = TRUE, FALSE)[-1L]
+  }
+  bold   <- carry("<b>", "</b>")
+  italic <- carry("<i>", "</i>")
+  is_brk <- !prev %in% c("", "<b>", "</b>", "<i>", "</i>")
+  line   <- cumsum(is_brk) + 1L
+
+  lines <- lapply(seq_len(max(line)), function(l) {
+    k <- which(line == l)
+    .tidy_runs(data.frame(
+      text   = .decode_entities(gsub("\\s+", " ", texts[k])),
+      bold   = bold[k], italic = italic[k]))
+  })
+
+  # Drop trailing blank lines only (keep intentional interior blanks)
+  blank <- vapply(lines, function(l) !nzchar(l$text[1]), logical(1))
+  while (length(lines) > 1L && blank[length(lines)]) {
+    lines <- lines[-length(lines)]; blank <- blank[-length(blank)]
+  }
+  lines
+}
+
+# Trim the line's outer whitespace, then merge neighbouring runs that share a
+# format. Always returns a data frame with at least one row.
+.tidy_runs <- function(df) {
+  blank <- data.frame(text = "", bold = FALSE, italic = FALSE)
+  df <- df[nzchar(df$text), , drop = FALSE]
+  if (nrow(df) == 0L) return(blank)
+  df$text[1]        <- sub("^\\s+", "", df$text[1])
+  df$text[nrow(df)] <- sub("\\s+$", "", df$text[nrow(df)])
+  df <- df[nzchar(df$text), , drop = FALSE]
+  if (nrow(df) == 0L) return(blank)
+  grp <- cumsum(c(TRUE, df$bold[-1] != df$bold[-nrow(df)] |
+                        df$italic[-1] != df$italic[-nrow(df)]))
+  data.frame(text   = unname(tapply(df$text, grp, paste0, collapse = "")),
+             bold   = df$bold[!duplicated(grp)],
+             italic = df$italic[!duplicated(grp)])
+}
+
+# Build <w:txbxContent> XML for a label that may contain <br> line breaks and
+# inline <b> / <i>. Each logical line becomes its own <w:p>, split into runs at
+# bold / italic changes. Every paragraph resets spacing and indentation so a
+# document template's Normal style (space after, 1.5 line spacing) cannot make
+# the text overflow its shape.
 # bold / font_size_hp: optional overrides read from per-element SVG properties.
 label_txbx_xml <- function(raw_label, text_col, jc = "center", ctx,
                             bold = FALSE, font_size_hp = NULL) {
-  segs <- strsplit(raw_label %||% "", "<br\\s*/?>|\\n", perl = TRUE)[[1]]
-  segs <- vapply(segs, function(s) xml_escape(strip_html(s)), character(1L),
-                 USE.NAMES = FALSE)
-  # Drop trailing blank segments only (keep intentional interior blanks)
-  while (length(segs) > 1L && !nzchar(segs[length(segs)])) segs <- segs[-length(segs)]
-  if (length(segs) == 0L) segs <- ""
+  lines <- parse_label_runs(raw_label)
 
-  rpr <- text_rpr_xml(text_col, ctx, bold = bold, font_size_hp = font_size_hp)
-  ppr <- if (!is.null(jc) && nzchar(jc))
-    paste0("<w:pPr><w:jc w:val=\"", jc, "\"/></w:pPr>") else ""
+  ppr <- paste0(
+    "<w:pPr>",
+      "<w:spacing w:before=\"0\" w:after=\"0\" w:line=\"240\" w:lineRule=\"auto\"/>",
+      "<w:ind w:left=\"0\" w:right=\"0\" w:firstLine=\"0\"/>",
+      if (!is.null(jc) && nzchar(jc)) paste0("<w:jc w:val=\"", jc, "\"/>") else "",
+    "</w:pPr>")
 
-  paras <- vapply(segs, function(seg) {
-    paste0("<w:p>", ppr, "<w:r>", rpr,
-           "<w:t xml:space=\"preserve\">", seg, "</w:t></w:r></w:p>")
-  }, character(1L), USE.NAMES = FALSE)
+  paras <- vapply(lines, function(runs) {
+    rs <- vapply(seq_len(nrow(runs)), function(i) {
+      paste0("<w:r>",
+             text_rpr_xml(text_col, ctx, bold = bold || runs$bold[i],
+                          font_size_hp = font_size_hp, italic = runs$italic[i]),
+             "<w:t xml:space=\"preserve\">", xml_escape(runs$text[i]), "</w:t></w:r>")
+    }, character(1L))
+    paste0("<w:p>", ppr, paste0(rs, collapse = ""), "</w:p>")
+  }, character(1L))
 
   paste0("<w:txbxContent>", paste0(paras, collapse = ""), "</w:txbxContent>")
 }
@@ -158,27 +243,39 @@ new_id_counter <- function(start = 1L) {
 #' @param ast Reserved for future use.
 #' @param start_id Integer. First shape ID; increment between diagrams.
 #' @param page_width_in Numeric. Usable content width in inches (default 6.27,
-#'   A4 portrait with 1" margins).
+#'   A4 portrait with 1" margins). The diagram is shrunk to fit it.
 #' @param page_height_in Numeric. Max diagram height in inches (default 9.69,
 #'   A4 portrait with 1" margins).
-#' @param margin_in Numeric. Left/top margin offset in inches (default 1.0).
+#' @param margin_in Numeric. Retained for compatibility; the drawing is placed
+#'   in line with the text, so it no longer positions the diagram.
 #' @param default_fill Default node fill colour (6-char hex). Default "FFFFFF".
 #' @param default_stroke Default stroke colour. Default "5E504E".
 #' @param default_text_color Default text colour. Default "000000".
 #' @param stroke_width_pt Stroke width in points. Default 1.5.
-#' @param font_scale Numeric multiplier applied to the computed font size before
-#'   writing `<w:sz>`. Default `1.0`. Rarely needed now that the measurement
-#'   font is correctly detected. Use values < 1 (e.g. `0.85`) only if you set
-#'   `word_font_family` to a font wider than Trebuchet MS (the mermaid default).
-#' @param word_font_family Character. Font name for Word text runs (`<w:rFonts>`).
-#'   Default `NULL`, which uses the measurement font detected from the SVG CSS
-#'   `--mermaid-font-family` variable (typically `"Trebuchet MS"`). Override
-#'   with e.g. `"Myriad Pro"` if you want a different display font in Word;
-#'   combine with `font_scale < 1.0` if the override font is wider than the
-#'   measurement font to avoid text overflowing node boxes.
-#' @param align Character. Horizontal alignment of the drawing on the page:
-#'   `"center"` (default), `"left"`, or `"right"`.
-#' @return Named list: xml (character) and next_id (integer).
+#' @param font_scale Numeric multiplier applied to the proportional font size
+#'   before writing `<w:sz>`. Default `1.0`. There is no readability floor: the
+#'   text stays in proportion to its shapes, and a `mermaid2drawml_small_text`
+#'   warning is signalled when it comes out below 7 pt (14 half-points). Use
+#'   values < 1 (e.g. `0.85`) only if you set `word_font_family` to a font
+#'   wider than the font the diagram was measured in.
+#' @param word_font_family Character. Font name for Word text runs (`<w:rFonts>`,
+#'   all of ascii, hAnsi, eastAsia and cs). Default `NULL`, which uses the first
+#'   family of the `font-family` the SVG declares on its root (the mermaid theme
+#'   `fontFamily`, e.g. `"Segoe UI"`; `"Trebuchet MS"` with no init block).
+#'   That is the font Chromium measured the labels in, so the shapes fit.
+#'   Override with e.g. `"Myriad Pro"`; combine with `font_scale < 1.0` if the
+#'   override font is wider than the measured one.
+#' @param align Character. Horizontal alignment of the drawing: `"center"`
+#'   (default), `"left"`, or `"right"`. It becomes the `w:jc` of the paragraph
+#'   that holds the (in-line) drawing.
+#' @param max_scale Numeric. Largest size, as a multiple of natural size (9525
+#'   EMU per SVG pixel, i.e. 96 dpi, so 16 px text is 12 pt), the diagram may be
+#'   drawn at. Default `1`: a small diagram is never enlarged, while a large one
+#'   is still shrunk to fit the page. Use `Inf` to fill the page (posters).
+#' @return Named list: xml (character) and next_id (integer). `xml` is a
+#'   `<w:p>` whose single run holds a `wp:inline` drawing (no anchor, no
+#'   absolute position), with explicit single line spacing so a template's
+#'   exact line spacing cannot clip it.
 #' @export
 build_diagram_xml <- function(svg_data,
                                ast                = NULL,
@@ -192,19 +289,23 @@ build_diagram_xml <- function(svg_data,
                                stroke_width_pt    = 1.5,
                                font_scale         = 1.0,
                                word_font_family   = NULL,
-                               align              = c("center", "left", "right")) {
+                               align              = c("center", "left", "right"),
+                               max_scale          = 1) {
   align <- match.arg(align)
 
   nodes  <- svg_data$nodes
   edges  <- svg_data$edges
+  # Invisible links (A ~~~ B) only shape the layout; mermaid does not draw them.
+  if (nrow(edges) > 0L && "line_type" %in% names(edges))
+    edges <- edges[!(edges$line_type %in% "invisible"), , drop = FALSE]
   vb     <- svg_data$viewbox   # c(minx, miny, svg_w, svg_h)
   sty    <- svg_data$style %||%
     list(font_size_px = 14, edge_stroke = default_stroke, edge_sw_px = 2)
 
   svg_w  <- vb[3]; svg_h <- vb[4]
-  scale  <- compute_scale(svg_w, svg_h, page_width_in, page_height_in)
-  off_x  <- inches_to_emu(margin_in)
-  off_y  <- inches_to_emu(margin_in)
+  # Fit to the page, but never enlarge beyond max_scale x natural size.
+  scale  <- min(compute_scale(svg_w, svg_h, page_width_in, page_height_in),
+                max_scale * 9525)
 
   # Font size: scale CSS pixels to half-points using the same SVG→page scale
   # factor applied to all geometry, so the rendered text remains proportional
@@ -219,27 +320,19 @@ build_diagram_xml <- function(svg_data,
   # foreignObject geometry — which is the cardinal principle: the SVG sets all
   # the spacing.
   #
-  # An absolute floor of 14 half-points (7pt) guards against unreadably tiny
-  # text on diagrams that scale down extremely. font_scale (default 1.0) is
-  # available as an escape hatch when the Word display font has wider metrics
-  # than the SVG measurement font.
-  proportional_hp_raw <- sty$font_size_px * scale / 6350
-  font_size_hp <- max(as.integer(round(proportional_hp_raw)), 14L)
-  font_size_hp <- max(as.integer(round(font_size_hp * font_scale)), 10L)
+  # There is deliberately no readability floor: raising the font above the
+  # proportional size makes text overflow shapes that do not grow with it, and
+  # silent clipping is worse than small text. Below 7 pt we warn instead.
+  # font_scale (default 1.0) multiplies the proportional size.
+  font_size_hp <- .font_hp(sty$font_size_px, scale, font_scale)
+  warn_small_text(font_size_hp)
 
-  # font_inflation: when the readability floor (or font_scale) inflates the
-  # rendered font above the value the SVG foreignObject was measured for, the
-  # text overlay used by non-rect shapes must grow by the same ratio to keep
-  # the text from overflowing. 1.0 when no floor is active.
-  font_inflation <- if (proportional_hp_raw > 0)
-    max(font_size_hp / proportional_hp_raw, 1.0) else 1.0
+  # font_inflation: how much larger than measured the text is rendered, which
+  # the text overlays of non-rect shapes must follow. Only font_scale > 1 does.
+  font_inflation <- max(font_scale, 1.0)
 
-  # Font family for Word <w:rFonts>: use word_font_family if explicitly supplied,
-  # otherwise use the measurement font from the SVG (--mermaid-font-family,
-  # typically Trebuchet MS).  This is distinct from sty$declared_font_family
-  # (the themeVariables fontFamily, e.g. "Myriad Pro"), which applies to the
-  # outer SVG but NOT to foreignObject node labels — those are measured in
-  # sty$font_family (the --mermaid-font-family stack, e.g. Trebuchet MS).
+  # Font family for Word <w:rFonts>: word_font_family if supplied, otherwise
+  # the font the SVG declares (the font Chromium measured the labels in).
   font_family <- word_font_family %||% sty$font_family %||% "Trebuchet MS"
 
   # Edge stroke: colour from SVG stylesheet; width scaled from SVG px, min 0.75pt.
@@ -261,7 +354,10 @@ build_diagram_xml <- function(svg_data,
     default_fill  = default_fill,
     default_stroke = default_stroke,
     dtc            = default_text_color,
-    sw_pt          = stroke_width_pt
+    sw_pt          = stroke_width_pt,
+    node_fill      = sty$node_fill   %||% NA_character_,
+    node_stroke    = sty$node_stroke %||% NA_character_,
+    font_scale     = font_scale
   )
 
   ctr <- new_id_counter(as.integer(start_id) + 1L)  # +1: super-anchor uses start_id
@@ -324,15 +420,39 @@ build_diagram_xml <- function(svg_data,
   }
 
   children_xml <- paste0(parts, collapse = "")
-  anchor_xml   <- make_super_anchor(off_x, off_y, sg_w_emu, sg_h_emu,
-                                     as.integer(start_id), children_xml,
-                                     h_align = align)
+  inline_xml   <- make_inline_drawing(sg_w_emu, sg_h_emu, as.integer(start_id),
+                                      children_xml)
 
-  xml <- paste0('<w:p ', .dml_namespaces, '>', anchor_xml, '</w:p>')
+  # The holder paragraph pins single spacing so a template whose Normal style
+  # has exact line spacing cannot clip the drawing.
+  xml <- paste0('<w:p ', .dml_namespaces, '>',
+                '<w:pPr>',
+                '<w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/>',
+                '<w:jc w:val="', align, '"/>',
+                '</w:pPr>', inline_xml, '</w:p>')
   list(xml = xml, next_id = ctr$peek())
 }
 
 # ── Scale ─────────────────────────────────────────────────────────────────
+
+# Font size in half-points for `px` CSS pixels drawn at `scale` EMU per pixel
+# (6350 EMU = 1 half-point), times font_scale; no floor above 2 half-points.
+.font_hp <- function(px, scale, font_scale = 1) {
+  # Round down (with a small tolerance so an exact 24.0 stays 24): text larger
+  # than Chromium measured would eat the slack in tight shapes.
+  max(as.integer(floor(px * scale / 6350 * font_scale + 1e-6)), 2L)
+}
+
+# Warn (class mermaid2drawml_small_text) when text is below 7 pt (14 half-points).
+warn_small_text <- function(font_size_hp) {
+  if (font_size_hp >= 14L) return(invisible(NULL))
+  rlang::warn(
+    paste0("Diagram text is ", format(font_size_hp / 2, trimws = TRUE), " pt, ",
+           "below the 7 pt readable minimum, because the diagram is scaled to ",
+           "fit the page. Use a wider page, landscape orientation, or split ",
+           "the diagram into smaller ones."),
+    class = "mermaid2drawml_small_text")
+}
 
 compute_scale <- function(svg_w, svg_h, page_w_in, page_h_in) {
   if (is.na(svg_w) || svg_w <= 0 || is.na(svg_h) || svg_h <= 0)
@@ -387,20 +507,13 @@ make_nested_grpSp <- function(grp_id, name, x_rel, y_rel, w_emu, h_emu,
   )
 }
 
-# ── Super-group anchor ──────────────────────────────────────────────────────
+# ── In-line drawing ─────────────────────────────────────────────────────────
 
-make_super_anchor <- function(x_page, y_page, w_emu, h_emu, shape_id,
-                               children_xml, h_align = "center") {
+# The drawing sits in the text flow (wp:inline), so it takes its place between
+# the surrounding paragraphs and can never overlap them or another diagram.
+make_inline_drawing <- function(w_emu, h_emu, shape_id, children_xml) {
   w_emu <- max(as.integer(w_emu), 91440L)
   h_emu <- max(as.integer(h_emu), 91440L)
-  # Horizontal position: centre/right use <wp:align> relative to the text
-  # column; left uses an absolute offset of 0 from the column edge.
-  h_pos_xml <- if (h_align %in% c("center", "right")) {
-    paste0('<wp:positionH relativeFrom="column"><wp:align>',
-           h_align, '</wp:align></wp:positionH>')
-  } else {
-    '<wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH>'
-  }
   # mc:AlternateContent with mc:Choice Requires="wpg" is required for Word to
   # activate its wpg namespace handler. Without this wrapper, nested wpg:grpSp
   # groups do not render even when the XML is otherwise spec-conformant.
@@ -409,23 +522,16 @@ make_super_anchor <- function(x_page, y_page, w_emu, h_emu, shape_id,
     '<mc:AlternateContent>',
     '<mc:Choice Requires="wpg">',
     '<w:drawing>',
-    '<wp:anchor distT="0" distB="0" distL="114300" distR="114300" ',
-      'simplePos="0" relativeHeight="251658240" behindDoc="0" ',
-      'locked="0" layoutInCell="1" allowOverlap="1">',
-    '<wp:simplePos x="0" y="0"/>',
-    h_pos_xml,
-    '<wp:positionV relativeFrom="page"><wp:posOffset>',
-      as.integer(y_page), '</wp:posOffset></wp:positionV>',
+    '<wp:inline distT="0" distB="0" distL="0" distR="0">',
     '<wp:extent cx="', w_emu, '" cy="', h_emu, '"/>',
     '<wp:effectExtent l="0" t="0" r="0" b="0"/>',
-    '<wp:wrapNone/>',
     '<wp:docPr id="', shape_id, '" name="mermaid:diagram" descr="{}"/>',
     '<wp:cNvGraphicFramePr/>',
     '<a:graphic>',
     '<a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingGroup">',
     make_root_wgp(w_emu, h_emu, children_xml),
     '</a:graphicData></a:graphic>',
-    '</wp:anchor></w:drawing>',
+    '</wp:inline></w:drawing>',
     '</mc:Choice>',
     '<mc:Fallback/>',
     '</mc:AlternateContent>',
@@ -643,7 +749,7 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
   # keeps its proportions to the cluster rect.
   sg_font_size_px <- sg$font_size_px %||% NA_real_
   sg_font_size_hp <- if (!is.na(sg_font_size_px))
-    max(as.integer(round(sg_font_size_px * ctx$scale / 6350)), 14L) else NULL
+    .font_hp(sg_font_size_px, ctx$scale, ctx$font_scale %||% 1) else NULL
   sg_bold <- isTRUE(sg$font_bold)
 
   descr <- jsonlite::toJSON(list(
@@ -679,6 +785,17 @@ subgraph_rect_wsp <- function(sg, w_emu, h_emu, ctx, ctr) {
 
 # ── Node emission ──────────────────────────────────────────────────────────
 
+# Nodes with no fill / stroke of their own take the theme's colours. A node
+# that is explicitly transparent (fill_none) stays transparent.
+resolve_node_colours <- function(nd, ctx) {
+  fill <- nd$fill %||% NA_character_
+  if (is.na(fill) && !isTRUE(nd$fill_none))
+    nd$fill <- ctx$node_fill %||% NA_character_
+  if (is.na(nd$stroke %||% NA_character_))
+    nd$stroke <- ctx$node_stroke %||% NA_character_
+  nd
+}
+
 emit_node <- function(nd, origin_x_px, origin_y_px, ctx, ctr) {
   scale      <- ctx$scale
   w_emu      <- max(as.integer(round(nd$svg_w * scale)), 91440L)
@@ -686,6 +803,7 @@ emit_node <- function(nd, origin_x_px, origin_y_px, ctx, ctr) {
   x_rel      <- as.integer(round((nd$svg_cx - origin_x_px) * scale)) - w_emu %/% 2L
   y_rel      <- as.integer(round((nd$svg_cy - origin_y_px) * scale)) - h_emu %/% 2L
   shape_name <- nd$shape %||% "rect"
+  nd         <- resolve_node_colours(nd, ctx)
 
   # stRect: custom stacked-rect implementation
   if (shape_name == "stRect") {
@@ -697,6 +815,8 @@ emit_node <- function(nd, origin_x_px, origin_y_px, ctx, ctr) {
   # misaligns the label (typically the same shapes that use foreignObject in SVG).
   needs_group <- shape_name %in% c(
     "diamond", "hexagon",
+    "ellipse",    # Word's ellipse text rectangle is the inscribed one, too small
+    "roundRect",  # stadium / rounded: the preset's text rectangle is inset
     "parallelogram", "leanR", "leanL",
     "trapezoid",
     "manualOp",   # inverted trapezoid
@@ -869,7 +989,8 @@ node_wsp <- function(nd, x_rel, y_rel, w_emu, h_emu, ctx, ctr) {
   prst       <- .shape_map[shape_name]
   if (is.na(prst)) prst <- "rect"
 
-  geom_xml <- paste0("<a:prstGeom prst=\"", prst, "\"><a:avLst/></a:prstGeom>")
+  geom_xml <- paste0("<a:prstGeom prst=\"", prst, "\">", round_avlst_xml(nd),
+                     "</a:prstGeom>")
   text_col <- node_text_colour(nd, is_transparent, fill_hex, ctx$dtc)
 
 
@@ -929,8 +1050,9 @@ node_visual_wsp <- function(nd, w_emu, h_emu, ctx, ctr) {
 
   prst       <- .shape_map[shape_name]
   if (is.na(prst)) prst <- "rect"
-  geom_xml   <- paste0("<a:prstGeom prst=\"", prst, "\">", slant_avlst_xml(nd),
-                       "</a:prstGeom>")
+  avlst      <- if (identical(shape_name, "roundRect")) round_avlst_xml(nd) else
+                  slant_avlst_xml(nd)
+  geom_xml   <- paste0("<a:prstGeom prst=\"", prst, "\">", avlst, "</a:prstGeom>")
 
   # leanL (lean-l) uses the parallelogram preset mirrored horizontally;
   # manualOp (trap-t, wide top) uses the trapezoid preset mirrored vertically.
@@ -965,6 +1087,18 @@ node_visual_wsp <- function(nd, w_emu, h_emu, ctx, ctr) {
       "<wps:bodyPr><a:noAutofit/></wps:bodyPr>",
     "</wps:wsp>"
   )
+}
+
+# <a:avLst> for roundRect: `adj` is the corner radius in 1/100000ths of the
+# shorter side, capped at 50000 (a pill). Word's default is about 1/6 of the
+# short side, so the SVG's own radius is used whenever the parser measured one.
+round_avlst_xml <- function(nd) {
+  if (!identical(nd$shape %||% "rect", "roundRect")) return("<a:avLst/>")
+  rx    <- nd$svg_rx %||% NA_real_
+  short <- min(nd$svg_w %||% NA_real_, nd$svg_h %||% NA_real_)
+  if (is.na(rx) || is.na(short) || short <= 0) return("<a:avLst/>")
+  adj <- min(as.integer(round(100000 * rx / short)), 50000L)
+  paste0("<a:avLst><a:gd name=\"adj\" fmla=\"val ", adj, "\"/></a:avLst>")
 }
 
 # <a:avLst> for the trapezoid and parallelogram presets. Both take one `adj`

@@ -14,7 +14,7 @@ test_that("mermaid_to_word returns correct class", {
   skip_if_not(node_available(), "node not on PATH")
   d <- mermaid_to_word("flowchart TB\n  A[Start] --> B[End]")
   expect_s3_class(d, "mermaid_word_diagram")
-  expect_named(d, c("xml", "svg_data", "ast", "next_id"))
+  expect_named(d, c("xml", "svg_data", "ast", "next_id", "orientation", "margins"))
 })
 
 test_that("mermaid_to_word xml is a non-empty character string", {
