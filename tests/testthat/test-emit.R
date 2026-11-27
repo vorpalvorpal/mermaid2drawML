@@ -510,7 +510,9 @@ test_that("flowchart-paint XML: the subgraph background keeps the theme fill FFF
 test_that("flowchart-paint XML: the cylinder is can at its true height", {
   cc <- shape_named(fixture_doc("flowchart-paint"), "mermaid:node:C")
   expect_equal(shape_prst(cc), "can")
-  expect_near(unname(shape_ext(cc)), c(80.5, 68.38) * 9525, tol = 2)
+  # 68.38 is given to two decimals (68.3796 in the fixture): half a unit of
+  # its last digit is 0.005 px.
+  expect_near(unname(shape_ext(cc)), c(80.5, 68.38) * 9525, tol = 0.005 * 9525)
 })
 
 test_that("flowchart-paint XML: the odd node D is custom geometry, not flowChartMultidocument", {
@@ -641,7 +643,7 @@ test_that("sequenceDiagram: participant boxes hold their names; messages have li
   items <- fixture_scene("sequenceDiagram")$items
   for (who in c("Alice", "Bob")) {
     boxes <- items[items$kind == "shape" & items$label == who, ]
-    expect_gte(nrow(boxes), 2L, info = who)         # top and bottom
+    expect_gte(nrow(boxes), 2L, label = paste(who, "boxes"))   # top and bottom
     expect_true(all(boxes$prst == "roundRect"), info = who)
   }
   msgs <- items[items$kind == "line" & items$tail != "none", ]

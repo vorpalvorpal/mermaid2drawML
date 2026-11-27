@@ -1,15 +1,19 @@
 Package: mermaid2drawml
 Type: Package
 Title: Convert Mermaid Diagrams to Editable Word Shapes
-Version: 0.2.0
+Version: 0.3.0
 Authors@R: person("Author", "Name", role = c("aut", "cre"), email = "author@example.com")
-Description: Converts Mermaid flowchart diagrams to natively editable Microsoft
-    Word shapes using the DrawingML wps:wsp format. Layout and SVG rendering
-    are delegated to the official Mermaid CLI (@mermaid-js/mermaid-cli), so
-    Word output matches the HTML/browser rendering. The resulting shapes are
-    editable in Word and can be inserted into documents via the officer package,
-    suitable for use in R Markdown workflows. Run setup_mermaid2drawml() once
-    after installation to download the required Node.js packages.
+Description: Converts Mermaid diagrams of any type (flowcharts, sequence,
+    class, state, entity-relationship, Gantt, pie, mind map and the others)
+    to natively editable Microsoft Word shapes in DrawingML. Mermaid lays out
+    and draws the diagram in a headless browser; the browser reports each
+    drawn primitive with its computed colours, line styles, fonts and text
+    layout, and these are rebuilt as grouped Word shapes with their labels
+    inside, so the result matches the browser rendering and themes and
+    styles are honoured. Diagrams can be inserted into documents via the
+    officer package, for example in R Markdown workflows. Run
+    setup_mermaid2drawml() once after installation to install the required
+    Node.js packages.
 License: MIT + file LICENSE
 SystemRequirements: Node.js (>= 18), npm
 Imports:
@@ -19,11 +23,13 @@ Imports:
     jsonlite (>= 1.8.0),
     tibble (>= 3.2.0),
     rlang (>= 1.1.0),
-    cli,
-    purrr,
+    cli (>= 3.6.0),
+    purrr (>= 1.0.0),
     stringr,
     withr,
-    tools
+    stats,
+    tools,
+    utils
 Suggests:
     testthat (>= 3.0.0),
     knitr,

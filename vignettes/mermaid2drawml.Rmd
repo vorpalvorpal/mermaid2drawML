@@ -21,14 +21,16 @@ library(mermaid2drawml)
 
 ## Introduction
 
-`mermaid2drawml` converts [Mermaid](https://mermaid.js.org/) flowchart diagrams
-into natively editable Microsoft Word shapes (DrawingML `wps:wsp` format). Unlike
-embedding a static image, the resulting shapes can be selected, moved, resized,
-and reformatted directly inside Word.
+`mermaid2drawml` converts [Mermaid](https://mermaid.js.org/) diagrams of any
+type into natively editable Microsoft Word shapes (DrawingML `wps:wsp` format).
+Unlike embedding a static image, the resulting shapes can be selected, moved,
+resized, and reformatted directly inside Word, and each label sits inside its
+shape.
 
-Layout and SVG rendering are delegated to the official
-[Mermaid CLI](https://github.com/mermaid-js/mermaid-cli) (`@mermaid-js/mermaid-cli`),
-so Word output matches what you see in a browser. The package integrates with
+Mermaid itself lays out and draws the diagram in a headless browser. The
+browser reports every shape it drew, with its computed colours, line styles,
+fonts and text layout, so Word output matches what you see in a browser,
+including themes, `classDef`, `style` and `linkStyle`. The package integrates with
 [officer](https://davidgohel.github.io/officer/), making it easy to insert
 diagrams from R Markdown reports.
 
@@ -68,8 +70,8 @@ print(diagram)
 The returned `mermaid_word_diagram` object contains:
 
 - `$xml` — the raw DrawingML XML string ready for `officer::body_add_xml()`
-- `$svg_data` — parsed SVG geometry (nodes, edges, viewbox)
-- `$ast` — the Mermaid JSON AST from `@mermaid-js/parser`
+- `$scene` — what was drawn: `$scene$items` has one row per Word shape or group
+- `$type` — the Mermaid diagram type
 - `$next_id` — the next available shape ID (needed when adding multiple diagrams)
 
 ### `body_add_mermaid()`
@@ -120,23 +122,27 @@ read_docx() |>
 ## Layout and Sizing Options
 
 `build_diagram_xml()` (called internally) accepts parameters that control how
-the SVG is fitted to the page. Pass these through `...` in `mermaid_to_word()`
-or `body_add_mermaid()`:
+the diagram is fitted to the page. Pass these through `...` in
+`mermaid_to_word()` or `body_add_mermaid()`:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `page_width_in` | 6.0 | Usable diagram width (inches) |
-| `page_height_in` | 8.0 | Maximum diagram height (inches) |
-| `margin_in` | 1.0 | Page margin offset (inches) |
-| `default_fill` | `"FFFFFF"` | Default node fill colour (hex) |
-| `default_stroke` | `"4472C4"` | Default stroke colour (hex) |
-| `stroke_width_pt` | 1.5 | Stroke width in points |
+| `page_width_in` | 6.27 | Usable diagram width (inches) |
+| `page_height_in` | 9.69 | Maximum diagram height (inches) |
+| `max_scale` | 1 | Largest size relative to Mermaid's own; `Inf` fills the page |
+| `font_scale` | 1 | Multiplies every text size |
+| `word_font_family` | `NULL` | Font for all text (default: the font Mermaid used) |
+| `min_stroke_pt` | 0.75 | Thinnest line drawn, in points |
+| `align` | `"center"` | Horizontal alignment of the drawing |
+| `alt_text` | `NULL` | Alternative text (default: `accDescr` or `accTitle`) |
+
+Mermaid's own configuration goes in `mermaid_config`:
 
 ```{r layout_opts}
 diagram <- mermaid_to_word(
   "flowchart LR\n  A --> B --> C",
   page_width_in = 5.0,
-  margin_in     = 0.5
+  mermaid_config = list(theme = "forest")
 )
 ```
 
@@ -168,23 +174,17 @@ print(doc, target = "multi.docx")
 
 ## Supported Mermaid Syntax
 
-The package supports the full feature set of `@mermaid-js/mermaid-cli`, including:
+Every diagram type Mermaid draws is converted: flowcharts, sequence, class,
+state, entity-relationship, Gantt, pie, mind map, timeline, XY and quadrant
+charts and the others. Flowchart node shapes that Word has a preset for
+(rectangles, rounded rectangles, stadiums, diamonds, circles, hexagons,
+parallelograms, trapezoids, cylinders, documents and more) become that
+preset; the others are drawn from their exact outline. Embedded images are
+left out with a warning.
 
-- **Directions**: `TB`, `TD`, `LR`, `BT`, `RL`
-- **Node shapes**: `[rect]`, `(roundRect)`, `{diamond}`, `((ellipse))`,
-  `{{hexagon}}`, `[(cylinder)]`, `@{shape: ...}` (v10 shapes)
-- **Edge types**: `-->` (arrow), `---` (line), `-.->` (dashed), `<-->` (bidirectional),
-  `o--o` (circle ends), `x--x` (cross ends), `==>` (thick)
-- **Edge labels**: `-->|label|` and inline `-- label -->`
-- **Chained edges**: `A --> B --> C`
-- **Subgraphs**
-- **`classDef`** style definitions with `fill`, `stroke`, `color`
-- **Comments**: `%% ...`
+## Shape Names
 
-## Round-Trip Metadata
-
-Each shape and connector in the generated Word document stores JSON metadata in
-its `wp:docPr descr` attribute. This metadata records the original Mermaid
-properties (node ID, label, shape type, edge endpoints, etc.) under a versioned
-schema (`"v": "1"`). A future Word-to-Mermaid conversion feature can use this
-metadata to reconstruct the diagram source from an edited Word document.
+Each shape is named after the Mermaid element it came from, for example
+`mermaid:node:A`, `mermaid:edge:A-B`, `mermaid:edge_label:A:B` and
+`mermaid:subgraph:S1` (a group whose first shape is the subgraph's
+background). The names show in Word's Selection Pane.

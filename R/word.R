@@ -1,16 +1,25 @@
-#' Convert a Mermaid diagram to a Word-embeddable object
+# R/word.R
+# The public wrappers: render, build the scene, build the DrawingML, and lay
+# the diagram out on the page (orientation, margins, its own section).
+
+#' Convert a Mermaid diagram to editable Word shapes
 #'
-#' Renders the diagram via `@mermaid-js/mermaid-cli` (for layout and SVG) and
-#' `@mermaid-js/parser` (for the AST), then converts the result to DrawingML
-#' XML suitable for insertion into a Word document.
+#' Renders the diagram in a headless browser with Mermaid itself, then turns
+#' what the browser drew into DrawingML: one in-line drawing of grouped,
+#' editable Word shapes. Every Mermaid diagram type is converted. Colours,
+#' line widths, dashes and fonts are the ones the browser computed, so
+#' themes, `classDef`, `style` and `linkStyle` are honoured; labels sit
+#' inside their shapes with Mermaid's own line breaks.
 #'
 #' Requires Node.js and the package's Node.js dependencies. Run
 #' [setup_mermaid2drawml()] once after installation.
 #'
-#' @param mermaid_code A character string of Mermaid flowchart syntax.
-#' @param start_id Integer. Starting shape ID. Increment between diagrams in
-#'   the same document to avoid ID collisions (see [body_add_mermaid()], which
-#'   picks a free one automatically). Default `1L`.
+#' @param mermaid_code Character. Mermaid source; a vector of lines is joined
+#'   with newlines.
+#' @param start_id Integer. Id of the drawing; its shapes take the following
+#'   ids. Increment between diagrams in the same document to avoid id
+#'   collisions (see [body_add_mermaid()], which picks a free one
+#'   automatically). Default `1L`.
 #' @param timeout Integer. Seconds to allow for the Node.js render. Default 120.
 #' @param orientation Page orientation for the output document: `"portrait"`,
 #'   `"landscape"`, or `"auto"` (default). Auto chooses landscape only when the
@@ -28,22 +37,23 @@
 #'     \item A named numeric vector with any subset of `top`, `bottom`, `left`,
 #'       `right`; unspecified sides default to `1`.
 #'   }
-#'   The content area is computed from an A4 page (8.27" × 11.69" portrait,
-#'   11.69" × 8.27" landscape) minus the supplied margins. For other sizes
-#'   pass `page_width_in` / `page_height_in` / `margin_in` directly via `...`.
-#' @param ... Additional arguments passed to [build_diagram_xml()], e.g.
-#'   `page_width_in`, `default_stroke`, `max_scale` (default `1`: small diagrams
-#'   are not enlarged; `Inf` fills the page), `font_scale`, `word_font_family`,
-#'   `align`. These take precedence over values computed from
-#'   `page_margins_in`. The drawing is placed in line with the text. Text below
-#'   7 pt signals a `mermaid2drawml_small_text` warning.
+#'   The content area is computed from an A4 page (8.27" x 11.69" portrait,
+#'   11.69" x 8.27" landscape) minus the supplied margins. For other sizes
+#'   pass `page_width_in` / `page_height_in` directly via `...`.
+#' @param mermaid_config `NULL`, or a named list of Mermaid configuration,
+#'   for example `list(theme = "forest")`; see [render_mermaid()].
+#' @param ... Arguments passed to [build_diagram_xml()], e.g. `max_scale`
+#'   (default `1`: small diagrams are not enlarged; `Inf` fills the page),
+#'   `font_scale`, `word_font_family`, `align`, `min_stroke_pt`, `alt_text`,
+#'   `page_width_in`. These take precedence over values computed from
+#'   `page_margins_in`.
 #' @return A `mermaid_word_diagram` object with fields:
 #'   - `xml`: DrawingML XML string ready for [officer::body_add_xml()]
-#'   - `svg_data`: parsed SVG geometry (nodes, edges, viewbox tibbles)
-#'   - `ast`: raw output from `@mermaid-js/parser`; a `_parseError` field
-#'     indicates an unsupported diagram type (e.g. flowchart). Currently unused
-#'     during conversion — see `enrich_from_ast()` in `parse_svg.R`.
-#'   - `next_id`: next available shape ID for chaining documents
+#'   - `scene`: what was drawn, one row per Word shape or group
+#'     (`scene$items`)
+#'   - `type`: the Mermaid diagram type
+#'   - `start_id`, `next_id`: the drawing's id and the next free id, for
+#'     chaining diagrams
 #'   - `orientation`: resolved orientation (`"portrait"` or `"landscape"`)
 #'   - `margins`: normalised margin list, or `NULL` if `page_margins_in` was
 #'     not supplied
@@ -54,26 +64,25 @@
 #' }
 #' @export
 mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
-                             orientation    = c("auto", "portrait", "landscape"),
-                             auto_aspect    = 1.3,
-                             page_margins_in = NULL,
-                             ...) {
+                            orientation = c("auto", "portrait", "landscape"),
+                            auto_aspect = 1.3,
+                            page_margins_in = NULL,
+                            mermaid_config = NULL,
+                            ...) {
   orientation <- match.arg(orientation)
-  margins     <- .normalise_margins(page_margins_in)
-  # render_mermaid() accepts a vector of lines; the old SVG parser wants one string.
+  margins <- .normalise_margins(page_margins_in)
   mermaid_code <- paste(mermaid_code, collapse = "\n")
 
-  rendered <- render_mermaid(mermaid_code, timeout = timeout)
-  svg_data <- parse_mermaid_svg(rendered$svg, rendered$ast, source = mermaid_code)
-
+  render <- render_mermaid(mermaid_code, timeout = timeout, config = mermaid_config)
+  scene <- build_scene(render)
   extra_args <- list(...)
 
   # The portrait content width is what "auto" compares the diagram against,
   # so it is needed before the orientation is known.
   resolved_orientation <- .resolve_orientation(
     orientation,
-    width_px  = svg_data$viewbox[3],
-    height_px = svg_data$viewbox[4],
+    width_px = scene$viewbox[[3]],
+    height_px = scene$viewbox[[4]],
     auto_aspect = auto_aspect,
     max_scale = extra_args$max_scale %||% 1,
     portrait_width_in = .content_size("portrait", margins)[["width"]]
@@ -81,32 +90,22 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
 
   size <- .content_size(resolved_orientation, margins)
   layout <- list(page_width_in = size[["width"]], page_height_in = size[["height"]])
-  if (!is.null(margins)) layout$margin_in <- margins$left
-  extra_args <- utils::modifyList(layout, extra_args)
-
-  result <- do.call(
-    build_diagram_xml,
-    c(list(svg_data  = svg_data,
-           ast       = rendered$ast,
-           start_id  = as.integer(start_id)),
-      extra_args)
-  )
+  args <- utils::modifyList(layout, extra_args)
+  start_id <- as.integer(start_id)
+  result <- rlang::exec(build_diagram_xml, scene, start_id = start_id, !!!args)
 
   structure(
-    list(xml         = result$xml,
-         svg_data    = svg_data,
-         ast         = rendered$ast,
-         next_id     = result$next_id,
-         orientation = resolved_orientation,
-         margins     = margins),
+    list(xml = result$xml, scene = scene, type = scene$type,
+         start_id = start_id, next_id = result$next_id,
+         orientation = resolved_orientation, margins = margins),
     class = "mermaid_word_diagram"
   )
 }
 
 #' Add a Mermaid diagram to a Word document
 #'
-#' A convenience wrapper around [mermaid_to_word()] that parses, renders, and
-#' inserts a Mermaid diagram directly into an `rdocx` document object.
+#' A convenience wrapper around [mermaid_to_word()] that renders a Mermaid
+#' diagram and inserts it into an `rdocx` document object as editable shapes.
 #'
 #' When the resolved orientation is landscape, or when `page_margins_in` is
 #' supplied, the diagram gets its own section. Anything already in the document
@@ -117,22 +116,15 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
 #' default margins adds no section properties.
 #'
 #' @param doc An `rdocx` object from [officer::read_docx()].
-#' @param mermaid_code A character string of Mermaid flowchart syntax.
-#' @param start_id Integer. Starting shape ID. Default `NULL`, meaning one more
+#' @inheritParams mermaid_to_word
+#' @param start_id Integer. Id of the drawing. Default `NULL`, meaning one more
 #'   than the largest id already used by a `wp:docPr` or any `cNvPr` in the
 #'   document body (1 for an empty document), so repeated calls on one document
 #'   never produce duplicate ids. An explicit value is used as given.
-#' @param timeout Integer. Seconds for Node.js render. Default 120.
-#' @param orientation Page orientation: `"portrait"`, `"landscape"`, or
-#'   `"auto"` (default). See [mermaid_to_word()] for details.
-#' @param auto_aspect Numeric. Aspect-ratio threshold for auto orientation.
-#'   Default `1.3`.
-#' @param page_margins_in Page margins in inches. See [mermaid_to_word()] for
-#'   full details. Default `NULL` (use built-in defaults).
-#' @param ... Additional arguments passed to [build_diagram_xml()], e.g.
-#'   `max_scale` (default `1`: a diagram is drawn at natural size at most;
-#'   `Inf` fills the page), `font_scale`, `word_font_family`, `align`.
-#'   The drawing is placed in line with the text, in its own paragraph.
+#' @param ... Arguments passed to [build_diagram_xml()], e.g. `max_scale`
+#'   (default `1`: a diagram is drawn at natural size at most; `Inf` fills the
+#'   page), `font_scale`, `word_font_family`, `align`, `alt_text`. The drawing
+#'   is placed in line with the text, in its own paragraph.
 #' @return The modified `rdocx` object (invisibly).
 #' @examples
 #' \dontrun{
@@ -145,20 +137,22 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
 #' }
 #' @export
 body_add_mermaid <- function(doc, mermaid_code, start_id = NULL,
-                              timeout         = 120L,
-                              orientation     = c("auto", "portrait", "landscape"),
-                              auto_aspect     = 1.3,
-                              page_margins_in = NULL,
-                              ...) {
+                             timeout = 120L,
+                             orientation = c("auto", "portrait", "landscape"),
+                             auto_aspect = 1.3,
+                             page_margins_in = NULL,
+                             mermaid_config = NULL,
+                             ...) {
   orientation <- match.arg(orientation)
   start_id <- start_id %||% .next_free_shape_id(doc)
   diagram <- mermaid_to_word(mermaid_code,
-                              start_id        = as.integer(start_id),
-                              timeout         = timeout,
-                              orientation     = orientation,
-                              auto_aspect     = auto_aspect,
-                              page_margins_in = page_margins_in,
-                              ...)
+                             start_id = as.integer(start_id),
+                             timeout = timeout,
+                             orientation = orientation,
+                             auto_aspect = auto_aspect,
+                             page_margins_in = page_margins_in,
+                             mermaid_config = mermaid_config,
+                             ...)
   needs_section <- diagram$orientation == "landscape" || !is.null(diagram$margins)
 
   # A section's properties sit at its end, so a diagram with its own layout
@@ -179,19 +173,25 @@ body_add_mermaid <- function(doc, mermaid_code, start_id = NULL,
 }
 
 #' @export
-print.mermaid_word_diagram <- function(x, ...) {
-  nd <- nrow(x$svg_data$nodes)
-  ed <- nrow(x$svg_data$edges)
-  cat("Mermaid Word Diagram\n")
-  cat("  Nodes      :", nd, "\n")
-  cat("  Edges      :", ed, "\n")
-  cat("  Shape IDs  : 1 -", x$next_id - 1L, "\n")
-  cat("  Orientation:", x$orientation, "\n")
-  if (!is.null(x$margins)) {
+format.mermaid_word_diagram <- function(x, ...) {
+  n_shapes <- sum(x$scene$items$kind != "group")
+  last_id <- x$next_id - 1L
+  margins <- if (!is.null(x$margins)) {
     m <- x$margins
-    cat(sprintf("  Margins    : top=%.2f  bottom=%.2f  left=%.2f  right=%.2f\n",
-                m$top, m$bottom, m$left, m$right))
+    cli::format_inline("Margins (in): top {m$top}, bottom {m$bottom}, left {m$left}, right {m$right}")
   }
+  c(
+    cli::format_inline("{.cls mermaid_word_diagram}: {x$type}"),
+    cli::format_inline("Shapes: {n_shapes}"),
+    cli::format_inline("Shape ids: {x$start_id} to {last_id}"),
+    cli::format_inline("Orientation: {x$orientation}"),
+    margins
+  )
+}
+
+#' @export
+print.mermaid_word_diagram <- function(x, ...) {
+  cli::cat_line(format(x, ...))
   invisible(x)
 }
 
@@ -203,7 +203,7 @@ print.mermaid_word_diagram <- function(x, ...) {
 #' ids that clash with nothing already there.
 #' @param doc An `rdocx` object.
 #' @return An integer; 1 when the body holds no ids.
-#' @keywords internal
+#' @noRd
 .next_free_shape_id <- function(doc) {
   ids <- xml2::xml_attr(
     xml2::xml_find_all(officer::docx_body_xml(doc),
@@ -217,7 +217,7 @@ print.mermaid_word_diagram <- function(x, ...) {
 #' Does the document body hold anything besides its final section properties?
 #' @param doc An `rdocx` object.
 #' @return A logical scalar.
-#' @keywords internal
+#' @noRd
 .has_body_content <- function(doc) {
   kids <- xml2::xml_find_all(
     officer::docx_body_xml(doc),
@@ -228,7 +228,7 @@ print.mermaid_word_diagram <- function(x, ...) {
 #' Section properties for the page a diagram sits on
 #' @param diagram A `mermaid_word_diagram`.
 #' @return An officer `prop_section`.
-#' @keywords internal
+#' @noRd
 .diagram_section <- function(diagram) {
   dims <- .page_dims(diagram$orientation)
   args <- list(
@@ -249,7 +249,7 @@ print.mermaid_word_diagram <- function(x, ...) {
 #' The only place the page size is defined.
 #' @param orientation `"portrait"` or `"landscape"`.
 #' @return Named numeric `c(width, height)`.
-#' @keywords internal
+#' @noRd
 .page_dims <- function(orientation) {
   short <- 8.27
   long  <- 11.69
@@ -265,7 +265,7 @@ print.mermaid_word_diagram <- function(x, ...) {
 #' @param margins Output of `.normalise_margins()`; `NULL` means 1 inch on
 #'   every side.
 #' @return Named numeric `c(width, height)` in inches.
-#' @keywords internal
+#' @noRd
 .content_size <- function(orientation, margins) {
   m <- margins %||% list(top = 1, bottom = 1, left = 1, right = 1)
   dims <- .page_dims(orientation)
@@ -291,7 +291,7 @@ print.mermaid_word_diagram <- function(x, ...) {
 #' @param max_scale The largest enlargement the diagram is drawn at.
 #' @param portrait_width_in Content width of a portrait page, in inches.
 #' @return `"portrait"` or `"landscape"`.
-#' @keywords internal
+#' @noRd
 .resolve_orientation <- function(orientation, width_px, height_px,
                                  auto_aspect = 1.3, max_scale = 1,
                                  portrait_width_in) {
@@ -307,7 +307,7 @@ print.mermaid_word_diagram <- function(x, ...) {
 #'   or list using any of `top`, `bottom`, `left`, `right`.
 #' @return `NULL`, or a list with `top`, `bottom`, `left`, `right` in that
 #'   order; missing sides are 1.
-#' @keywords internal
+#' @noRd
 .normalise_margins <- function(page_margins_in) {
   if (is.null(page_margins_in)) return(NULL)
 
