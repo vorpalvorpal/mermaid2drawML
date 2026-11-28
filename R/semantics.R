@@ -3,41 +3,9 @@
 # kanban, mindmap) mark in their DOM, and what that means for Word:
 #   - units: nodes, subgraphs, edges and edge labels (spec 3c), joined to
 #     Mermaid's own node/edge data (`db`) when the bridge has it;
-#   - the flowchart shape registry (3d);
-#   - the marker table that names line ends.
-# The generic conversion these build on is in R/scene.R.
-
-# ---- line ends ---------------------------------------------------------------
-
-# Patterns on the marker id (the bridge has removed the render id prefix),
-# tried in order; the first that matches names the end. Word has no X end, so
-# a cross is a diamond, as it always was here.
-.line_end_table <- tibble::tribble(
-  ~pattern,                                                       ~kind,
-  "sequencenumber",                                               "none",
-  "onlyone|zeroorone|oneormore|zeroormore|mdparent|mdchild",      "none",
-  "aggregation|composition",                                      "diamond",
-  "cross",                                                        "diamond",
-  "circle|lollipop",                                              "oval",
-  "dependency|stick",                                             "arrow",
-  "point|arrowhead|filled-head|barb|extension|requirement_arrow", "triangle"
-)
-
-#' The DrawingML line end for a marker id
-#'
-#' @param marker_id Marker id(s) as the bridge reports them, or NULL.
-#' @return "none" for no marker; otherwise the kind from the marker table,
-#'   "triangle" when no pattern matches.
-#' @noRd
-line_end_kind <- function(marker_id) {
-  if (length(marker_id) == 0L) return("none")
-  purrr::map_chr(as.character(unlist(marker_id)), function(id) {
-    if (is.na(id) || !nzchar(id)) return("none")
-    hit <- purrr::detect_index(.line_end_table$pattern,
-                               function(pat) grepl(pat, tolower(id)))
-    if (hit == 0L) "triangle" else .line_end_table$kind[[hit]]
-  })
-}
+#   - the flowchart shape registry (3d).
+# The generic conversion these build on is in R/scene.R; line ends and the
+# marker table are in R/markers.R.
 
 # ---- the shape registry ------------------------------------------------------
 
@@ -290,6 +258,11 @@ piece_units <- function(pieces, nodes) {
     list(pieces$i, pieces$src == "path", pieces$id, pieces$data, pieces$anc),
     piece_unit, node_dom_ids = dom_ids
   )
+  # Marker shapes follow their edge into its unit; they come right after it,
+  # so they join its run.
+  host <- marker_host(pieces)
+  follows <- which(!is.na(host))
+  info[follows] <- info[host[follows]]
   u <- tibble::tibble(
     kind = purrr::map_chr(info, "kind"), anc_id = purrr::map_chr(info, "anc_id"),
     sig = purrr::map_chr(info, "sig"), ref = purrr::map_chr(info, "ref"),
@@ -429,7 +402,8 @@ registered_item <- function(pu, reg, hand_drawn, name) {
     flip_h = reg$flip_h, flip_v = reg$flip_v, adj = list(adj),
     path = list(NULL), closed = TRUE,
     dash = list(if (is.na(stroke_from)) NULL else shapes$dash[[stroke_from]]),
-    text = list(text)
+    text = list(text),
+    head_len = "med", head_w = "med", tail_len = "med", tail_w = "med"
   )
 }
 
@@ -464,8 +438,7 @@ name_unit <- function(items, name) {
     items$name <- name
     return(items)
   }
-  purrr::list_rbind(list(group_item(name, NA_character_, drawn_box(items)),
-                         reparent(items, name)))
+  group_under(items, name)
 }
 
 # Each row of folded pieces as a block of its own.
@@ -516,13 +489,21 @@ with_name <- function(p, name) {
 }
 
 # Edges are never filled and keep their exact path, even a rectangular one.
+# An edge with marker shapes is grouped with them (spec C3).
 unit_blocks_edge <- function(u, pu) {
-  pu$fill <- NA_character_
-  pu$fill_a <- 0
-  pu$prst[pu$kind != "line"] <- NA_character_
-  pu$closed <- purrr::map_lgl(pu$path, function(p) !is.null(p) && path_closed(p))
-  pu$name <- u$name
-  new_blocks("edge", u$pos, list(to_items(pu)), start = u$start, end = u$end)
+  marks <- !is.na(pu$marker_of)
+  edge <- pu[!marks, ]
+  edge$fill <- NA_character_
+  edge$fill_a <- 0
+  edge$prst[edge$kind != "line"] <- NA_character_
+  edge$closed <- purrr::map_lgl(edge$path, function(p) !is.null(p) && path_closed(p))
+  edge$name <- u$name
+  items <- to_items(edge)
+  if (any(marks)) {
+    items <- group_under(purrr::list_rbind(list(items, to_items(pu[marks, ]))),
+                         sub("^mermaid:edge", "mermaid:edge_group", u$name))
+  }
+  new_blocks("edge", u$pos, list(items), start = u$start, end = u$end)
 }
 
 unit_blocks_edge_label <- function(u, pu) {
@@ -639,5 +620,5 @@ scene_items <- function(pieces, db, viewbox) {
   has_db <- nrow(nodes) > 0L
   blocks <- if (has_db) db_membership(blocks, nodes) else box_membership(blocks)
   blocks <- add_undrawn_groups(blocks, stats::setNames(nodes$parent, nodes$id))
-  nest_level(NA_character_, NA_character_, blocks)
+  unique_group_names(nest_level(NA_character_, NA_character_, blocks))
 }

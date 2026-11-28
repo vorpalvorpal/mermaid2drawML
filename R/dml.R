@@ -142,17 +142,21 @@ dml_fill <- function(hex, alpha = 1) {
 #' @param hex NA draws no line.
 #' @param dash A DrawingML preset dash name, or NA for solid.
 #' @param head,tail Line-end types; "none" writes no end.
+#' @param head_size,tail_size Each end's size classes c(w, len), "sm" |
+#'   "med" | "lg".
 #' @noRd
-dml_ln <- function(width, hex, alpha = 1, dash = NA, head = "none", tail = "none") {
+dml_ln <- function(width, hex, alpha = 1, dash = NA, head = "none", tail = "none",
+                   head_size = c(w = "med", len = "med"),
+                   tail_size = c(w = "med", len = "med")) {
   if (is.na(hex)) return(xml_tag("a:ln", .children = xml_tag("a:noFill")))
-  line_end <- function(tag, type) {
-    if (!identical(type, "none")) xml_tag(tag, type = type, w = "med", len = "med")
+  line_end <- function(tag, type, size) {
+    if (!identical(type, "none")) xml_tag(tag, type = type, w = size[["w"]], len = size[["len"]])
   }
   xml_tag("a:ln", w = width, .children = c(
     dml_fill(hex, alpha),
     if (!is.na(dash)) xml_tag("a:prstDash", val = dash),
-    line_end("a:headEnd", head),
-    line_end("a:tailEnd", tail)
+    line_end("a:headEnd", head, head_size),
+    line_end("a:tailEnd", tail, tail_size)
   ))
 }
 

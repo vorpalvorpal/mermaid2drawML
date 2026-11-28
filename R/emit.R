@@ -204,7 +204,9 @@ shape_xml <- function(it, origin, ctx) {
     geometry_xml(it, w, h, s),
     dml_fill(if (free_text) NA_character_ else it$fill, it$fill_a),
     dml_ln(line_w, if (stroked) it$stroke else NA_character_, it$stroke_a,
-           dash = dash_preset(it$dash, it$stroke_w), head = it$head, tail = it$tail)
+           dash = dash_preset(it$dash, it$stroke_w), head = it$head, tail = it$tail,
+           head_size = c(w = it$head_w, len = it$head_len),
+           tail_size = c(w = it$tail_w, len = it$tail_len))
   )
   has_text <- !is.null(it$text) && length(it$text$rows) > 0L
   dml_wsp(

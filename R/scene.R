@@ -23,6 +23,18 @@
 #                   document order, nested as the elements nest. A scope is the
 #                   element a piece was drawn in (its innermost ancestor, by
 #                   the bridge's DOM serial `n`); see "prims -> pieces".
+#                   A marker Word has no line end for (crow's foot, hollow
+#                   triangle or diamond, cross, sequence number circle) is
+#                   drawn as shapes (kind "shape", its strokes too) named
+#                   mermaid:marker:<marker id>, right after its edge in paint
+#                   order (R/markers.R). The edge and
+#                   its marker shapes are grouped as
+#                   mermaid:edge_group:<start>-<end> (an edge unit), or
+#                   mermaid:edge_group:<item name without "mermaid:"> (any
+#                   other line or path, e.g. mermaid:edge_group:line:msg).
+#                   A stroke of no length is only its marker shapes, not
+#                   grouped when there is one (the sequence number's circle,
+#                   which takes the number as its text).
 #   kind       chr  "group" | "shape" | "line" | "text"
 #   parent     chr  `name` of the enclosing group row, NA at the top level
 #   x, y, w, h dbl  box. With rot != 0 it is the unrotated box, centred where
@@ -36,10 +48,18 @@
 #   fill_a, stroke_a     dbl  alpha 0-1 (0 when the paint is NA)
 #   stroke_w   dbl  stroke width, px (0 when there is no stroke)
 #   head, tail chr  line end at the path START / END: "none", "triangle",
-#                   "arrow", "stealth", "diamond", "oval"
+#                   "arrow", "stealth", "diamond", "oval". The path end is
+#                   moved so that Word's end sits where Mermaid's marker was
+#                   (an arrow's tip, a circle's or diamond's centre); an end
+#                   drawn as marker shapes is "none".
 #   label      chr  the item's text, rows joined with "\n"; "" when none
 #
 # Internal columns:
+#   head_len, head_w, tail_len, tail_w
+#              chr  Word's size of each line end along and across the line,
+#                   "sm" | "med" | "lg" (a:headEnd / a:tailEnd len and w),
+#                   from the marker's drawn size over the stroke width;
+#                   "med" when there is no end or no marker definition
 #   flip_h, flip_v lgl   a:xfrm flipH / flipV. For a line (kind "line", preset
 #                   "line", which runs from the box's top left to its bottom
 #                   right) the flips put its start (head end) and end (tail
@@ -101,7 +121,7 @@ build_scene <- function(render) {
       class = "mermaid2drawml_bad_input"
     )
   }
-  pieces <- scene_pieces(render$prims, render$viewBox)
+  pieces <- scene_pieces(render$prims, render$viewBox, render$markers)
   structure(
     list(type = render$type, viewbox = render$viewBox, title = render$title,
          desc = render$desc, unsupported = scene_unsupported(render$prims),
@@ -130,52 +150,52 @@ scene_unsupported <- function(prims) {
 #                a scope.
 #   chain  list  the serials of all its ancestors, outermost first (those
 #                that have one); scope groups nest along it.
+#   marker_of   int  on marker shapes grouped with their edge: the edge's `i`
+#                    (R/markers.R); NA otherwise
+#   edge_group  chr  on those shapes: the group's name when the edge is not
+#                    a unit
 
 item_cols <- c("name", "kind", "parent", "x", "y", "w", "h", "rot", "prst",
                "fill", "stroke", "fill_a", "stroke_a", "stroke_w", "head",
                "tail", "label", "flip_h", "flip_v", "adj", "path", "closed",
-               "dash", "text")
+               "dash", "text", "head_len", "head_w", "tail_len", "tail_w")
 
-piece_ptype <- function() {
-  tibble::tibble(
-    i = integer(), pos = numeric(), src = character(), name = character(),
-    kind = character(),
-    parent = character(), x = numeric(), y = numeric(), w = numeric(),
-    h = numeric(), rot = numeric(), prst = character(), fill = character(),
-    stroke = character(), fill_a = numeric(), stroke_a = numeric(),
-    stroke_w = numeric(), head = character(), tail = character(),
-    label = character(), flip_h = logical(), flip_v = logical(), adj = list(),
-    path = list(), closed = logical(), dash = list(), text = list(),
-    html = logical(), corner_r = numeric(), id = character(), cls = character(),
-    anc = list(), data = list(), marker_start = character(),
-    marker_end = character(), scope = integer(), chain = list()
-  )
-}
+# Built once: the prototype of every rbind of pieces and of empty items.
+.piece_proto <- tibble::tibble(
+  i = integer(), pos = numeric(), src = character(), name = character(),
+  kind = character(),
+  parent = character(), x = numeric(), y = numeric(), w = numeric(),
+  h = numeric(), rot = numeric(), prst = character(), fill = character(),
+  stroke = character(), fill_a = numeric(), stroke_a = numeric(),
+  stroke_w = numeric(), head = character(), tail = character(),
+  label = character(), flip_h = logical(), flip_v = logical(), adj = list(),
+  path = list(), closed = logical(), dash = list(), text = list(),
+  html = logical(), corner_r = numeric(), id = character(), cls = character(),
+  anc = list(), data = list(), marker_start = character(),
+  marker_end = character(), scope = integer(), chain = list(),
+  head_len = character(), head_w = character(), tail_len = character(),
+  tail_w = character(), marker_of = integer(), edge_group = character()
+)
+
+piece_ptype <- function() .piece_proto
 
 #' Every drawable prim as a piece in root space, without those wholly outside
-#' the viewBox
+#' the viewBox, with its marker ends applied (R/markers.R)
+#' @param markers `render$markers`, or NULL.
 #' @noRd
-scene_pieces <- function(prims, viewbox) {
-  converters <- list(
-    rect = piece_rect, ellipse = piece_ellipse, line = piece_line,
-    poly = function(p) piece_outline(p, poly_path(p$geom$points, isTRUE(p$geom$closed))),
-    path = function(p) piece_outline(p, path_parse(p$geom$d %||% "")),
-    text = piece_text
-  )
-  drawable <- purrr::keep(prims, function(p) p$kind %in% names(converters))
-  pieces <- purrr::list_rbind(
-    purrr::map(drawable, function(p) converters[[p$kind]](p)),
-    ptype = piece_ptype()
-  )
-  pieces[box_in_view(pieces, viewbox) & !zero_stroke(pieces), ]
+scene_pieces <- function(prims, viewbox, markers = NULL) {
+  drawable <- purrr::keep(prims, function(p) p$kind %in% names(.piece_converters))
+  pieces <- purrr::list_rbind(purrr::map(drawable, prim_piece), ptype = piece_ptype())
+  place_markers(pieces[box_in_view(pieces, viewbox) & !zero_stroke(pieces), ], markers)
+}
+
+zero_length <- function(p) {
+  (p$kind == "line" | p$closed %in% FALSE) & p$w <= 0.01 & p$h <= 0.01
 }
 
 # A stroke of no length draws nothing in Word; one with a marker is kept,
 # because the marker is what Mermaid meant to show there.
-zero_stroke <- function(p) {
-  (p$kind == "line" | p$closed %in% FALSE) & p$w <= 0.01 & p$h <= 0.01 &
-    is.na(p$marker_start) & is.na(p$marker_end)
-}
+zero_stroke <- function(p) zero_length(p) & no_marker(p)
 
 # Mermaid can park items far off the canvas (the gantt "today" marker); an
 # item that only straddles the edge is kept.
@@ -206,7 +226,9 @@ new_piece <- function(p, kind, box, rot = 0, prst = NA_character_,
     id = as.character(p$id %||% ""), cls = as.character(p$cls %||% ""),
     anc = list(p$anc %||% list()), data = list(p$data %||% list()),
     marker_start = marker_id(p$marker_start), marker_end = marker_id(p$marker_end),
-    scope = anc_scope(p$anc), chain = list(anc_serials(p$anc))
+    scope = anc_scope(p$anc), chain = list(anc_serials(p$anc)),
+    head_len = "med", head_w = "med", tail_len = "med", tail_w = "med",
+    marker_of = NA_integer_, edge_group = NA_character_
   ), nrow = 1L)
 }
 
@@ -436,6 +458,21 @@ piece_text <- function(p) {
   new_piece(p, "text", box, rot = prim_number(p$rot), text = text, label = label)
 }
 
+# Prim kind -> piece; kinds not listed (images, <use>, ...) are not drawn.
+.piece_converters <- list(
+  rect = piece_rect, ellipse = piece_ellipse, line = piece_line,
+  poly = function(p) piece_outline(p, poly_path(p$geom$points, isTRUE(p$geom$closed))),
+  path = function(p) piece_outline(p, path_parse(p$geom$d %||% "")),
+  text = piece_text
+)
+
+#' One prim as a piece, or NULL for a kind that is not drawn
+#' @noRd
+prim_piece <- function(p) {
+  convert <- .piece_converters[[p$kind]]
+  if (is.null(convert)) NULL else convert(p)
+}
+
 # ---- folding pieces (3a, 3b; step 2 B2, B5, B6, B8) ---------------------------
 
 #' Apply the generic rules to the pieces of a unit, or to everything outside
@@ -460,6 +497,9 @@ boxes_agree <- function(b, one, tol = 0.5) {
 scope_key <- function(scope) ifelse(is.na(scope), -1L, scope)
 
 no_marker <- function(p) is.na(p$marker_start) & is.na(p$marker_end)
+
+# Neither marked nor a marker shape: free to fold with other pieces.
+unmarked <- function(p) no_marker(p) & is.na(p$marker_of)
 
 # Mermaid paints an edge label's background on its div, span and p: one box.
 collapse_html_boxes <- function(p) {
@@ -528,7 +568,7 @@ find_frames <- function(ends, tol = 1) {
 # Mermaid draws a sequence diagram's loop and alt frames as four lines; in
 # Word they are one rectangle that moves as one, at the first line's place.
 frame_rects <- function(p) {
-  cand <- which(p$kind == "line" & no_marker(p))
+  cand <- which(p$kind == "line" & unmarked(p))
   if (length(cand) < 4L) return(p)
   dash <- purrr::map_chr(p$dash[cand], function(d) paste(d, collapse = ","))
   key <- paste(scope_key(p$scope[cand]), p$stroke[cand], p$stroke_a[cand],
@@ -624,7 +664,7 @@ fold_box <- function(pieces) {
 }
 
 pair_by_box <- function(p) {
-  eligible <- p$kind == "shape" & no_marker(p)
+  eligible <- p$kind == "shape" & unmarked(p)
   if (sum(eligible) < 2L) return(p)
   # Pieces join only a piece that joined nothing, so the leader is the root.
   leader <- box_leaders(p, eligible)
@@ -816,8 +856,16 @@ group_item <- function(name, parent, box) {
     prst = NA_character_, fill = NA_character_, stroke = NA_character_,
     fill_a = 0, stroke_a = 0, stroke_w = 0, head = "none", tail = "none",
     label = "", flip_h = FALSE, flip_v = FALSE, adj = list(numeric()),
-    path = list(NULL), closed = NA, dash = list(NULL), text = list(NULL)
+    path = list(NULL), closed = NA, dash = list(NULL), text = list(NULL),
+    head_len = "med", head_w = "med", tail_len = "med", tail_w = "med"
   )
+}
+
+#' Items under a new top-level group `name`
+#' @noRd
+group_under <- function(items, name) {
+  purrr::list_rbind(list(group_item(name, NA_character_, drawn_box(items)),
+                         reparent(items, name)))
 }
 
 #' Put items at the top level of group `parent` (their own nesting is kept)
@@ -900,11 +948,11 @@ grouped_scopes <- function(p, viewbox) {
 scope_blocks <- function(p, viewbox) {
   none <- list(pos = numeric(), items = list())
   if (nrow(p) == 0L) return(none)
+  loose <- loose_entries(p)
+  p <- loose$p
+  entries <- loose$items
   made <- sort(grouped_scopes(p, viewbox))
-  items <- to_items(p)
-  if (length(made) == 0L) {
-    return(list(pos = p$pos, items = unname(split(items, seq_len(nrow(items))))))
-  }
+  if (length(made) == 0L) return(list(pos = p$pos, items = entries))
   names(made) <- unique_names(purrr::map_chr(made, function(s) {
     scope_group_base(anc_entry(s, p$anc))
   }))
@@ -919,7 +967,7 @@ scope_blocks <- function(p, viewbox) {
     deepest_made(ch[seq_len(match(s, ch) - 1L)])
   })
   group_name <- function(s) if (is.na(s)) NA_character_ else names(made)[match(s, made)]
-  items$parent <- purrr::map_chr(holder, group_name)
+  entries <- purrr::map2(entries, holder, function(it, s) reparent(it, group_name(s)))
 
   # Rows of group `s`: its row, then its members in paint order.
   first_pos <- purrr::map_dbl(made, function(s) {
@@ -928,7 +976,7 @@ scope_blocks <- function(p, viewbox) {
   group_rows <- function(s) {
     own <- which(holder %in% s)
     subs <- made[group_parent %in% s]
-    parts <- c(purrr::map(own, function(i) items[i, ]), purrr::map(subs, group_rows))
+    parts <- c(entries[own], purrr::map(subs, group_rows))
     order_pos <- c(p$pos[own], first_pos[match(subs, made)])
     inner <- purrr::list_rbind(parts[order(order_pos)])
     purrr::list_rbind(list(
@@ -939,6 +987,51 @@ scope_blocks <- function(p, viewbox) {
   top_items <- which(is.na(holder))
   top_groups <- made[is.na(group_parent)]
   list(pos = c(p$pos[top_items], first_pos[match(top_groups, made)]),
-       items = c(purrr::map(top_items, function(i) items[i, ]),
-                 purrr::map(top_groups, group_rows)))
+       items = c(entries[top_items], purrr::map(top_groups, group_rows)))
+}
+
+#' Loose pieces as the items each stands for: one row, except that an edge
+#' with marker shapes stands for the group of itself and them (spec C3),
+#' which is then one member of its scope group
+#'
+#' @return list(p, items): the pieces without the marker shapes so grouped,
+#'   and one items tibble per remaining piece.
+#' @noRd
+loose_entries <- function(p) {
+  items <- to_items(p)
+  entries <- unname(split(items, seq_len(nrow(items))))
+  marks <- which(!is.na(p$marker_of))
+  if (length(marks) == 0L) return(list(p = p, items = entries))
+  # The edge a shape belongs to; a stroke of no length left only its shapes,
+  # and the first of them leads.
+  edge <- marker_host(p)[marks]
+  lead <- ifelse(is.na(edge), marks[match(p$marker_of[marks], p$marker_of[marks])], edge)
+  by_lead <- split(marks, lead)
+  leads <- as.integer(names(by_lead))
+  entries[leads] <- purrr::map2(leads, by_lead, function(l, ms) {
+    rows <- unique(c(l, ms))
+    group_under(purrr::list_rbind(entries[rows]), p$edge_group[[ms[[1]]]])
+  })
+  gone <- setdiff(marks, leads)
+  keep <- setdiff(seq_len(nrow(p)), gone)
+  list(p = p[keep, ], items = entries[keep])
+}
+
+#' Group names made unique in document order (x, x#2, ...), each child
+#' following its own group: two edges between the same nodes give two edge
+#' groups of one name
+#' @noRd
+unique_group_names <- function(items) {
+  g <- which(items$kind == "group")
+  if (!anyDuplicated(items$name[g])) return(items)
+  renamed <- unique_names(items$name[g])
+  # A row's parent is the latest group row above it with that name.
+  dup_names <- unique(items$name[g][duplicated(items$name[g])])
+  affected <- which(items$parent %in% dup_names)
+  items$parent[affected] <- purrr::map_chr(affected, function(r) {
+    k <- max(which(g < r & items$name[g] == items$parent[[r]]))
+    renamed[[k]]
+  })
+  items$name[g] <- renamed
+  items
 }

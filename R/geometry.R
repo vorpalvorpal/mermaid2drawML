@@ -34,6 +34,32 @@ mat_is_upright <- function(m, tol = 1e-6) {
   abs(m[[2]]) <= tol && abs(m[[3]]) <= tol
 }
 
+mat_translate <- function(dx, dy) c(1, 0, 0, 1, dx, dy)
+
+mat_scaling <- function(s) c(s, 0, 0, s, 0, 0)
+
+#' Rotation by `deg` degrees clockwise on screen (y points down)
+#' @noRd
+mat_rotate <- function(deg) {
+  r <- deg * pi / 180
+  c(cos(r), sin(r), -sin(r), cos(r), 0, 0)
+}
+
+#' The matrix that applies `first`, then `then`
+#' @noRd
+mat_then <- function(first, then) {
+  a <- then
+  b <- first
+  c(a[[1]] * b[[1]] + a[[3]] * b[[2]], a[[2]] * b[[1]] + a[[4]] * b[[2]],
+    a[[1]] * b[[3]] + a[[3]] * b[[4]], a[[2]] * b[[3]] + a[[4]] * b[[4]],
+    a[[1]] * b[[5]] + a[[3]] * b[[6]] + a[[5]],
+    a[[2]] * b[[5]] + a[[4]] * b[[6]] + a[[6]])
+}
+
+#' Matrices composed in the order they apply
+#' @noRd
+mat_chain <- function(...) purrr::reduce(list(...), mat_then)
+
 # ---- path construction ------------------------------------------------------
 
 path_cols <- c("cmd", "x1", "y1", "x2", "y2", "x", "y")
@@ -360,16 +386,69 @@ cubic_extrema <- function(p0, p1, p2, p3) {
   (1 - t)^3 * p0 + 3 * (1 - t)^2 * t * p1 + 3 * (1 - t) * t^2 * p2 + t^3 * p3
 }
 
-# Where each segment starts: the previous segment's end, with Z ending at the
-# subpath start.
+# Where each segment ends, with Z ending at the subpath start: list(x, y)
+# (a plain list; this is called for every path end and box).
 path_ends <- function(path) {
   is_m <- path$cmd == "M"
   start_row <- cummax(ifelse(is_m, seq_along(path$cmd), 0L))
   is_z <- path$cmd == "Z"
-  tibble::tibble(
+  list(
     x = ifelse(is_z, path$x[pmax(start_row, 1L)], path$x),
     y = ifelse(is_z, path$y[pmax(start_row, 1L)], path$y)
   )
+}
+
+#' Where a path starts or ends and the direction it runs there
+#'
+#' The direction is towards the first control or end point that differs from
+#' the end (at the start) or from the last such point to the end (at the
+#' end), as SVG orients markers.
+#' @param at "start" or "end".
+#' @return list(point = c(x, y), dir = unit c(dx, dy), NA when the path has
+#'   no length at that end).
+#' @noRd
+path_end_frame <- function(path, at) {
+  n <- nrow(path)
+  ends <- path_ends(path)
+  pt <- function(k) c(ends$x[[k]], ends$y[[k]])
+  ctrl <- function(k, which) c(path[[paste0("x", which)]][[k]], path[[paste0("y", which)]][[k]])
+  is_c <- function(k) identical(path$cmd[[k]], "C")
+  if (at == "start") {
+    point <- pt(1L)
+    toward <- if (n < 2L) list() else if (is_c(2L)) list(ctrl(2L, 1), ctrl(2L, 2), pt(2L)) else list(pt(2L))
+    away <- purrr::map(toward, function(q) q - point)
+  } else {
+    point <- pt(n)
+    from <- if (n < 2L) list() else if (is_c(n)) list(ctrl(n, 2), ctrl(n, 1), pt(n - 1L)) else list(pt(n - 1L))
+    away <- purrr::map(from, function(q) point - q)
+  }
+  d <- purrr::detect(away, function(v) isTRUE(sqrt(sum(v^2)) > 1e-9))
+  list(point = point, dir = if (is.null(d)) c(NA_real_, NA_real_) else d / sqrt(sum(d^2)))
+}
+
+#' Move a path's start or end point by vector `v`; the control point next to
+#' it moves with it, so a cubic keeps its direction there
+#' @noRd
+path_move_end <- function(path, at, v) {
+  n <- nrow(path)
+  if (at == "start") {
+    path$x[[1]] <- path$x[[1]] + v[[1]]
+    path$y[[1]] <- path$y[[1]] + v[[2]]
+    if (n >= 2L && path$cmd[[2]] == "C") {
+      path$x1[[2]] <- path$x1[[2]] + v[[1]]
+      path$y1[[2]] <- path$y1[[2]] + v[[2]]
+    }
+    return(path)
+  }
+  # A closed path has no free end.
+  if (path$cmd[[n]] == "Z") return(path)
+  path$x[[n]] <- path$x[[n]] + v[[1]]
+  path$y[[n]] <- path$y[[n]] + v[[2]]
+  if (path$cmd[[n]] == "C") {
+    path$x2[[n]] <- path$x2[[n]] + v[[1]]
+    path$y2[[n]] <- path$y2[[n]] + v[[2]]
+  }
+  path
 }
 
 #' True extent of a path as c(x, y, w, h), cubic extrema included

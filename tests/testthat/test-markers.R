@@ -31,7 +31,7 @@ path_points <- function(path) {
 # The same for a (possibly missing) marker shape row.
 marker_points <- function(s) {
   if (nrow(s) == 0L || is.null(s$path[[1]])) return(matrix(numeric(), 0L, 2L))
-  marker_points(s)
+  path_points(s$path[[1]])
 }
 
 col_or <- function(items, col, default = NA_character_) {
