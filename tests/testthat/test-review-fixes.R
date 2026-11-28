@@ -210,7 +210,10 @@ test_that("coordinates beyond the 32-bit EMU range are written in full", {
     prim_path(sprintf("M%d,%d L%d,%d L%d,%d Z", far, far, far + 60, far, far + 30, far + 50),
               fill = "#FF0000")
   )
-  doc <- generic_doc(prims, viewBox = c(0, 0, 200, 100))
+  # The canvas must hold the shapes (items off the canvas are dropped) and the
+  # page must be big enough that the diagram is not shrunk.
+  doc <- generic_doc(prims, viewBox = c(0, 0, far + 200, far + 100),
+                     page_width_in = 1e4, page_height_in = 1e4)
   offs <- xfind(doc, "//a:off")
   exts <- xfind(doc, "//a:ext")
   expect_gt(length(offs), 0L)

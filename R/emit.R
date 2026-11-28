@@ -131,10 +131,12 @@ diagram_scale <- function(vb, page_width_in, page_height_in, max_scale) {
   if (length(fit) == 0L) .emu_per_px else min(fit)
 }
 
-emu <- function(px, scale) as.integer(round(px * scale))
+# Whole EMU as a double: 2^31 EMU is only about 225 000 px, which a large
+# diagram can pass.
+emu <- function(px, scale) round(px * scale)
 
 # Word rejects a zero extent.
-emu_size <- function(px, scale) max(1L, emu(px, scale))
+emu_size <- function(px, scale) max(1, emu(px, scale))
 
 # ---- items -> markup ---------------------------------------------------------------
 
@@ -149,7 +151,27 @@ children_xml <- function(items, parent, origin, ctx) {
   paste(xml, collapse = "")
 }
 
+# Every number an item puts in the markup. A non-finite one would be dropped
+# or written as "NA", so the item is named in an error instead.
+item_numbers <- function(it) {
+  p <- it$path
+  drawn <- if (!is.null(p)) p[p$cmd != "Z", ]
+  curved <- if (!is.null(p)) p[p$cmd == "C", ]
+  c(it$x, it$y, it$w, it$h, if (it$kind != "group") c(it$rot, it$stroke_w, it$text$insets),
+    drawn$x, drawn$y, curved$x1, curved$y1, curved$x2, curved$y2)
+}
+
+check_item_finite <- function(it) {
+  num <- item_numbers(it)
+  if (!all(is.finite(num))) {
+    cli::cli_abort("The item {.val {it$name}} has a position or size that is not a finite number.",
+                   class = "mermaid2drawml_render_error")
+  }
+  it
+}
+
 item_xml <- function(it, items, origin, ctx) {
+  check_item_finite(it)
   s <- ctx$scale
   if (it$kind == "group") {
     return(dml_grp(it$name, emu(it$x - origin[[1]], s), emu(it$y - origin[[2]], s),

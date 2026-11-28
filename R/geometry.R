@@ -400,27 +400,34 @@ path_ends <- function(path) {
 
 #' Where a path starts or ends and the direction it runs there
 #'
-#' The direction is towards the first control or end point that differs from
-#' the end (at the start) or from the last such point to the end (at the
-#' end), as SVG orients markers.
+#' The direction is towards the nearest point that differs from the end (at
+#' the start), or from the nearest such point to the end (at the end), as SVG
+#' orients markers: a zero-length segment or a control point on the end is
+#' walked past. The walk stays within the first (or last) subpath.
 #' @param at "start" or "end".
 #' @return list(point = c(x, y), dir = unit c(dx, dy), NA when the path has
 #'   no length at that end).
 #' @noRd
 path_end_frame <- function(path, at) {
-  n <- nrow(path)
   ends <- path_ends(path)
-  pt <- function(k) c(ends$x[[k]], ends$y[[k]])
-  ctrl <- function(k, which) c(path[[paste0("x", which)]][[k]], path[[paste0("y", which)]][[k]])
-  is_c <- function(k) identical(path$cmd[[k]], "C")
-  if (at == "start") {
-    point <- pt(1L)
-    toward <- if (n < 2L) list() else if (is_c(2L)) list(ctrl(2L, 1), ctrl(2L, 2), pt(2L)) else list(pt(2L))
-    away <- purrr::map(toward, function(q) q - point)
+  starts <- which(path$cmd == "M")
+  rows <- if (at == "start") {
+    seq_len(if (length(starts) > 1L) starts[[2]] - 1L else nrow(path))
   } else {
-    point <- pt(n)
-    from <- if (n < 2L) list() else if (is_c(n)) list(ctrl(n, 2), ctrl(n, 1), pt(n - 1L)) else list(pt(n - 1L))
-    away <- purrr::map(from, function(q) point - q)
+    seq(max(starts, 1L), nrow(path))
+  }
+  # Each row's points in drawing order: a cubic's controls, then its end.
+  points <- purrr::flatten(purrr::map(rows, function(k) {
+    c(if (path$cmd[[k]] == "C") list(c(path$x1[[k]], path$y1[[k]]), c(path$x2[[k]], path$y2[[k]])),
+      list(c(ends$x[[k]], ends$y[[k]])))
+  }))
+  n <- length(points)
+  if (at == "start") {
+    point <- points[[1]]
+    away <- purrr::map(points[-1L], function(q) q - point)
+  } else {
+    point <- points[[n]]
+    away <- purrr::map(rev(points[-n]), function(q) point - q)
   }
   d <- purrr::detect(away, function(v) isTRUE(sqrt(sum(v^2)) > 1e-9))
   list(point = point, dir = if (is.null(d)) c(NA_real_, NA_real_) else d / sqrt(sum(d^2)))
@@ -451,6 +458,17 @@ path_move_end <- function(path, at, v) {
   path
 }
 
+#' Which rows of a path have an end point that is drawn
+#'
+#' A moveto that starts no line or curve (a trailing one, or one followed by
+#' another moveto) marks nothing. A path made only of movetos keeps them all.
+#' @noRd
+path_drawn_points <- function(path) {
+  next_cmd <- c(path$cmd[-1L], NA_character_)
+  keep <- path$cmd %in% c("L", "C") | (path$cmd == "M" & next_cmd %in% c("L", "C"))
+  if (any(keep)) keep else path$cmd != "Z"
+}
+
 #' True extent of a path as c(x, y, w, h), cubic extrema included
 #' @noRd
 path_bbox <- function(path) {
@@ -463,10 +481,9 @@ path_bbox <- function(path) {
     unlist(purrr::pmap(list(p0[is_c], p1[is_c], p2[is_c], p3[is_c]),
                        cubic_extrema))
   }
-  xs <- c(path$x[path$cmd != "Z"],
-          curve(prev_x, path$x1, path$x2, path$x))
-  ys <- c(path$y[path$cmd != "Z"],
-          curve(prev_y, path$y1, path$y2, path$y))
+  keep <- path_drawn_points(path)
+  xs <- c(path$x[keep], curve(prev_x, path$x1, path$x2, path$x))
+  ys <- c(path$y[keep], curve(prev_y, path$y1, path$y2, path$y))
   c(min(xs), min(ys), max(xs) - min(xs), max(ys) - min(ys))
 }
 

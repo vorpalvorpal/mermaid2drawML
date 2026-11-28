@@ -4,7 +4,7 @@
 // shape identity from SVG text. ES module ("type": "module" in package.json).
 //
 // Usage
-//   node mermaid_bridge.js [--config <config.json>] <in1.mmd> [<in2.mmd> ...]
+//   node mermaid_bridge.js [--config <config.json>] [--timeout <ms>] <in1.mmd> [<in2.mmd> ...]
 //
 //   Dependencies (puppeteer, mermaid, @mermaid-js/mermaid-cli and
 //   @mermaid-js/mermaid-zenuml) are found under $M2D_NODE_DIR/node_modules, or
@@ -19,7 +19,7 @@
 //   browser failure, with a message on stderr.
 //
 // Result (bridge contract 3)
-//   failure: { ok: false, error: { message } }   (syntax error, render error,
+//   failure: { ok: false, error: { message, kind } }, kind 'syntax' | 'timeout' | 'bridge'   (syntax error, render error,
 //            or "timed out after 60 s"; never Mermaid's error picture)
 //   success: { ok: true, bridge: 2, mermaid: "<version>", type, role,
 //              viewBox: [x, y, w, h], title, desc, svg, prims, markers, db }
@@ -84,13 +84,19 @@ const SVG_ID = 'm2d';
 const PAGE_TIMEOUT_MS = 60000;
 const RANDOM_SEED = 20240101;
 const VIEWPORT = { width: 1600, height: 1200, deviceScaleFactor: 1 };
-const USAGE = 'usage: node mermaid_bridge.js [--config <config.json>] <in1.mmd> [<in2.mmd> ...]';
+const USAGE = 'usage: node mermaid_bridge.js [--config <config.json>] [--timeout <ms>] <in1.mmd> [<in2.mmd> ...]';
 
 // ---- Node driver ------------------------------------------------------------
 
 const fail = (message, exitCode) => Object.assign(new Error(message), { exitCode });
 
-const parseArgs = (args, acc = { config: null, inputs: [] }) => {
+const parseTimeout = (text) => {
+  const ms = Number(text);
+  if (!Number.isFinite(ms) || ms <= 0) throw fail(`--timeout needs a positive number of milliseconds, not ${text}`, 2);
+  return ms;
+};
+
+const parseArgs = (args, acc = { config: null, timeout: PAGE_TIMEOUT_MS, inputs: [] }) => {
   if (args.length === 0) return acc;
   const [a, ...rest] = args;
   if (a === '--config') {
@@ -98,6 +104,11 @@ const parseArgs = (args, acc = { config: null, inputs: [] }) => {
     return parseArgs(rest.slice(1), { ...acc, config: rest[0] });
   }
   if (a.startsWith('--config=')) return parseArgs(rest, { ...acc, config: a.slice(9) });
+  if (a === '--timeout') {
+    if (rest.length === 0) throw fail('--timeout needs a number of milliseconds', 2);
+    return parseArgs(rest.slice(1), { ...acc, timeout: parseTimeout(rest[0]) });
+  }
+  if (a.startsWith('--timeout=')) return parseArgs(rest, { ...acc, timeout: parseTimeout(a.slice(10)) });
   if (a.startsWith('--')) throw fail(`unknown option ${a}`, 2);
   return parseArgs(rest, { ...acc, inputs: [...acc.inputs, a] });
 };
@@ -153,7 +164,9 @@ const withTimeout = (promise, ms, onTimeout) => {
 const mapSeries = (xs, f) =>
   xs.reduce(async (acc, x, i) => [...(await acc), await f(x, i)], Promise.resolve([]));
 
-const failure = (message) => ({ ok: false, error: { message } });
+// kind: 'syntax' (Mermaid refused or failed to draw the diagram), 'timeout',
+// or 'bridge' (anything else that went wrong here).
+const failure = (message, kind) => ({ ok: false, error: { message, kind } });
 
 // Runs in the page before any script. Mermaid draws some ids from Math.random
 // (state dividers, gitGraph commits) and roughjs seeds from it. A seeded
@@ -185,15 +198,15 @@ const renderOnPage = async (page, deps, code, config) => {
   return { ok, bridge: BRIDGE_VERSION, mermaid: deps.mermaidVersion, type, ...rest, db };
 };
 
-const renderOne = async (browser, deps, code, config, label) => {
+const renderOne = async (browser, deps, code, config, label, timeoutMs) => {
   const page = await browser.newPage();
   page.on('console', (msg) => process.stderr.write(`[${label}] ${msg.text()}\n`));
   page.on('pageerror', (err) => process.stderr.write(`[${label}] page error: ${err.message}\n`));
   try {
-    return await withTimeout(renderOnPage(page, deps, code, config), PAGE_TIMEOUT_MS,
-      () => failure(`timed out after ${PAGE_TIMEOUT_MS / 1000} s`));
+    return await withTimeout(renderOnPage(page, deps, code, config), timeoutMs,
+      () => failure(`timed out after ${timeoutMs / 1000} s`, 'timeout'));
   } catch (e) {
-    return failure(`bridge: ${e.message}`);
+    return failure(`bridge: ${e.message}`, 'bridge');
   } finally {
     await withTimeout(page.close().catch(() => null), 5000, () => null);
   }
@@ -214,7 +227,7 @@ const main = async (argv, env) => {
   const results = await (async () => {
     try {
       return await mapSeries(codes, (code, i) =>
-        renderOne(browser, deps, code, config, path.basename(args.inputs[i])));
+        renderOne(browser, deps, code, config, path.basename(args.inputs[i]), args.timeout));
     } finally {
       await browser.close();
     }
@@ -641,11 +654,11 @@ async function pageMain({ code, config, svgId }) {
       return { error: errMessage(e) };
     }
   })();
-  if (rendered.error !== undefined) return { ok: false, error: { message: rendered.error } };
+  if (rendered.error !== undefined) return { ok: false, error: { message: rendered.error, kind: 'syntax' } };
   container.innerHTML = rendered.svg;
   await document.fonts.ready;
   const root = container.querySelector('svg');
-  if (!root) return { ok: false, error: { message: 'Mermaid produced no svg element' } };
+  if (!root) return { ok: false, error: { message: 'Mermaid produced no svg element', kind: 'bridge' } };
 
   try {
     const vb = root.viewBox && root.viewBox.baseVal && root.viewBox.baseVal.width > 0
@@ -667,7 +680,7 @@ async function pageMain({ code, config, svgId }) {
       markers: markersFor(root, prims, serial),
     };
   } catch (e) {
-    return { ok: false, error: { message: `bridge walker: ${errMessage(e)}${e && e.stack ? `\n${e.stack}` : ''}` } };
+    return { ok: false, error: { message: `bridge walker: ${errMessage(e)}${e && e.stack ? `\n${e.stack}` : ''}`, kind: 'bridge' } };
   }
 }
 

@@ -24,3 +24,18 @@ xml_escape <- function(text) {
   text <- gsub("\"", "&quot;", text, fixed = TRUE)
   gsub("'", "&apos;", text, fixed = TRUE)
 }
+
+#' Numbers as whole-number strings, at any size
+#'
+#' Going through R integers would turn anything past 2^31 into NA, and
+#' `format()` would use scientific notation, so the digits are written
+#' directly. Adding zero turns a negative zero into zero.
+#' @param v Numeric vector; non-finite values are an error, never "NA".
+#' @noRd
+whole_number <- function(v) {
+  if (!all(is.finite(v))) {
+    cli::cli_abort("A non-finite number cannot be written as an XML attribute.",
+                   class = "mermaid2drawml_render_error")
+  }
+  formatC(round(v) + 0, format = "f", digits = 0)
+}

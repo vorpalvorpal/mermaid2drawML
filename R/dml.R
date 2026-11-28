@@ -32,14 +32,25 @@
 #' @noRd
 dml_id <- function() structure(.id_mark, class = "dml_id")
 
-# Attribute values: integers for every number (EMU, half-points, angles; a
-# double such as 1e5 would otherwise print in scientific notation), "1"/"0"
+# Attribute values: whole numbers for every number (EMU, half-points, angles;
+# a double such as 1e5 would otherwise print in scientific notation), "1"/"0"
 # for logicals, escaped text for the rest.
 attr_value <- function(v) {
   if (inherits(v, "dml_id")) return(unclass(v))
   if (is.logical(v)) return(if (v) "1" else "0")
-  if (is.numeric(v)) return(sprintf("%d", as.integer(round(v))))
-  xml_escape(as.character(v))
+  if (is.numeric(v)) return(whole_number(v))
+  attr_escape(as.character(v))
+}
+
+# White space other than the space is changed to a space when an XML parser
+# normalises an attribute, so line breaks and tabs are written as references.
+.attr_white_space <- c("\n" = "&#10;", "\r" = "&#13;", "\t" = "&#9;")
+
+attr_escape <- function(text) {
+  text <- xml_escape(text)
+  purrr::reduce2(names(.attr_white_space), .attr_white_space,
+                 function(acc, ch, ref) gsub(ch, ref, acc, fixed = TRUE),
+                 .init = text)
 }
 
 #' One XML element
@@ -89,14 +100,14 @@ dml_xfrm <- function(x, y, w, h, rot = 0, flip_h = FALSE, flip_v = FALSE,
 #' @noRd
 dml_prst_geom <- function(prst, adj = numeric()) {
   gds <- purrr::imap_chr(as.list(adj), function(v, nm) {
-    xml_tag("a:gd", name = nm, fmla = paste("val", sprintf("%d", as.integer(round(v)))))
+    xml_tag("a:gd", name = nm, fmla = paste("val", whole_number(v)))
   })
   xml_tag("a:prstGeom", prst = prst,
           .children = xml_tag("a:avLst", .children = unname(gds)))
 }
 
 # A point list, vectorised over its coordinates.
-dml_pts <- function(x, y) sprintf("<a:pt x=\"%d\" y=\"%d\"/>", x, y)
+dml_pts <- function(x, y) sprintf("<a:pt x=\"%s\" y=\"%s\"/>", whole_number(x), whole_number(y))
 
 #' a:custGeom with one a:path
 #'
@@ -105,17 +116,20 @@ dml_pts <- function(x, y) sprintf("<a:pt x=\"%d\" y=\"%d\"/>", x, y)
 #' @param w,h The box in EMU (the path's coordinate space).
 #' @noRd
 dml_cust_geom <- function(path, w, h) {
-  int <- function(v) as.integer(round(v))
-  end <- dml_pts(int(path$x), int(path$y))
-  # One column per command; each segment takes the column of its command.
-  forms <- cbind(
-    M = paste0("<a:moveTo>", end, "</a:moveTo>"),
-    L = paste0("<a:lnTo>", end, "</a:lnTo>"),
-    C = paste0("<a:cubicBezTo>", dml_pts(int(path$x1), int(path$y1)),
-               dml_pts(int(path$x2), int(path$y2)), end, "</a:cubicBezTo>"),
-    Z = rep("<a:close/>", nrow(path))
+  # Each command's markup is made only from the rows that use it: the other
+  # rows hold NA in those columns, which no number may be written from.
+  forms <- list(
+    M = function(p) paste0("<a:moveTo>", dml_pts(p$x, p$y), "</a:moveTo>"),
+    L = function(p) paste0("<a:lnTo>", dml_pts(p$x, p$y), "</a:lnTo>"),
+    C = function(p) paste0("<a:cubicBezTo>", dml_pts(p$x1, p$y1), dml_pts(p$x2, p$y2),
+                           dml_pts(p$x, p$y), "</a:cubicBezTo>"),
+    Z = function(p) rep("<a:close/>", nrow(p))
   )
-  segs <- forms[cbind(seq_len(nrow(path)), match(path$cmd, colnames(forms)))]
+  segs <- character(nrow(path))
+  for (cmd in names(forms)) {
+    rows <- path$cmd == cmd
+    segs[rows] <- forms[[cmd]](path[rows, ])
+  }
   xml_tag(
     "a:custGeom",
     .children = c(

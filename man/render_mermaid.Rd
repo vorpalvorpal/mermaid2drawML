@@ -10,8 +10,10 @@ render_mermaid(mermaid_code, timeout = 120L, config = NULL)
 \item{mermaid_code}{Character. Mermaid source; a vector of lines is joined
 with newlines.}
 
-\item{timeout}{Seconds to wait for the Node process. Chrome can be slow to
-start the first time.}
+\item{timeout}{Seconds the whole render may take, Node and Chrome start-up
+included; Chrome can be slow to start the first time. The bridge is
+given this less a start-up allowance (never under 5 seconds) as its own
+limit for the page.}
 
 \item{config}{\code{NULL}, or a named list of Mermaid configuration (for example
 \code{list(theme = "forest")}), written as JSON and given to the bridge.}
@@ -30,3 +32,11 @@ drew: positioned shapes with computed paint, laid-out text and Mermaid's
 own node and edge data. The bridge is run from the installed package, so it
 always matches the R code reading its output.
 }
+\section{Errors}{
+
+A diagram Mermaid cannot parse or draw is an error of class
+\code{mermaid2drawml_syntax_error}; a render that runs out of time is
+\code{mermaid2drawml_timeout}; any other failure of the bridge or the browser
+is \code{mermaid2drawml_render_error}.
+}
+

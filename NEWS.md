@@ -50,6 +50,25 @@
 * Literal `*` and `_` in labels are kept, and edges to node ids that contain
   underscores are no longer lost.
 
+* Inverted trapezoids and the other shapes that needed a vertical flip are
+  drawn from their real outline, so their text is no longer upside down in
+  Word.
+
+* A line that repeats its last point, or a curve whose end control point
+  sits on its end, gets its arrowhead pointing along the line, as in SVG.
+
+* Diagrams larger than about 225 000 px no longer lose their positions and
+  sizes (they overflowed 32-bit integers); a coordinate that is not a finite
+  number is an error naming the shape.
+
+* Figures a few pixels across (a 3 px diamond or pentagon) are no longer
+  taken for ellipses, and a rectangle with only one corner radius is no
+  longer rounded.
+
+* A stray moveto at the end of a path no longer stretches its bounding box.
+
+* Line breaks and tabs in the diagram's alternative text are kept.
+
 * The drawing's alternative text comes from the diagram's `accTitle` /
   `accDescr`, or from the new `alt_text` argument.
 
@@ -59,7 +78,18 @@
   of Mermaid configuration (for example `list(theme = "forest")`).
 
 * A Mermaid syntax error now reports Mermaid's own message (error class
-  `mermaid2drawml_syntax_error`).
+  `mermaid2drawml_syntax_error`). A render that runs out of time is
+  `mermaid2drawml_timeout`, and any other failure of the bridge or browser
+  is `mermaid2drawml_render_error`.
+
+* `render_mermaid(timeout = )` limits the whole render; the bridge's own
+  limit for the page is that less a start-up allowance (at least 5 seconds).
+
+* An empty `mermaid_config` sends no configuration; `NULL` members are kept
+  as JSON `null`, and numbers keep their full precision.
+
+* The bridge's output is read as UTF-8 on every platform, so non-ASCII
+  labels survive on Windows.
 
 * `build_diagram_xml()` no longer uses `ast`, `margin_in`, `default_fill`,
   `default_stroke`, `default_text_color` or `stroke_width_pt`; they are

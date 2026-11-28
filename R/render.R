@@ -44,8 +44,10 @@
 #'
 #' @param mermaid_code Character. Mermaid source; a vector of lines is joined
 #'   with newlines.
-#' @param timeout Seconds to wait for the Node process. Chrome can be slow to
-#'   start the first time.
+#' @param timeout Seconds the whole render may take, Node and Chrome start-up
+#'   included; Chrome can be slow to start the first time. The bridge is
+#'   given this less a start-up allowance (never under 5 seconds) as its own
+#'   limit for the page.
 #' @param config `NULL`, or a named list of Mermaid configuration (for example
 #'   `list(theme = "forest")`), written as JSON and given to the bridge.
 #' @return An object of class `mermaid_render`: a list with `type`, `role`,
@@ -53,6 +55,11 @@
 #'   primitives), `markers` (the line-end markers the primitives use, by id),
 #'   `db` (Mermaid's node and edge data, or `NULL`) and `mermaid` (the
 #'   Mermaid version).
+#' @section Errors:
+#' A diagram Mermaid cannot parse or draw is an error of class
+#' `mermaid2drawml_syntax_error`; a render that runs out of time is
+#' `mermaid2drawml_timeout`; any other failure of the bridge or the browser
+#' is `mermaid2drawml_render_error`.
 #' @export
 render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL) {
   check_mermaid2drawml()
@@ -60,9 +67,10 @@ render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL) {
   mmd <- withr::local_tempfile(fileext = ".mmd")
   writeLines(enc2utf8(paste(mermaid_code, collapse = "\n")), mmd, useBytes = TRUE)
 
-  config_args <- if (!is.null(config)) {
+  config_args <- if (length(config) > 0L) {
     cfg <- withr::local_tempfile(fileext = ".json")
-    jsonlite::write_json(config, cfg, auto_unbox = TRUE)
+    # NULL members must stay (as null), and digits = NA keeps full precision.
+    jsonlite::write_json(config, cfg, auto_unbox = TRUE, null = "null", digits = NA)
     c("--config", cfg)
   }
 
@@ -72,11 +80,12 @@ render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL) {
   result <- processx::run(
     "node",
     c(system.file("node", "mermaid_bridge.js", package = "mermaid2drawml"),
-      config_args, mmd),
+      "--timeout", bridge_timeout_ms(timeout), config_args, mmd),
     env = c("current",
             M2D_NODE_DIR = .node_dir(),
             if (!is.na(browser)) c(PUPPETEER_EXECUTABLE_PATH = browser)),
     timeout = timeout,
+    encoding = "UTF-8",
     cleanup_tree = TRUE,
     error_on_status = FALSE
   )
@@ -84,8 +93,27 @@ render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL) {
   as_mermaid_render(parse_bridge_output(result, timeout))
 }
 
+# Time (s) Node and Chrome need to start before the page's own limit applies.
+.bridge_startup_s <- 20
+
+# The in-page limit given to the bridge (ms): the render's timeout less the
+# start-up allowance, but long enough for a small diagram.
+bridge_timeout_ms <- function(timeout) {
+  max(5000, round((timeout - .bridge_startup_s) * 1000))
+}
+
+# The error class for each kind of failure the bridge reports. An older
+# bridge reports no kind, and only ever reported Mermaid's own errors.
+.failure_classes <- c(syntax = "mermaid2drawml_syntax_error",
+                      timeout = "mermaid2drawml_timeout",
+                      bridge = "mermaid2drawml_render_error")
+
+failure_class <- function(kind) {
+  unname(.failure_classes[[if (is.character(kind) && kind %in% names(.failure_classes)) kind else "syntax"]])
+}
+
 # The bridge prints a JSON array with one result per input; we send one input.
-# A Mermaid syntax error is a normal result (`ok: false`), not a failure.
+# A failed diagram is a normal result (`ok: false`) with an error kind.
 parse_bridge_output <- function(result, timeout) {
   if (isTRUE(result$timeout)) {
     cli::cli_abort(
@@ -119,7 +147,7 @@ parse_bridge_output <- function(result, timeout) {
   if (is.list(first) && identical(first$ok, FALSE)) {
     cli::cli_abort(
       c("Mermaid could not render the diagram.", x = "{first$error$message}"),
-      class = "mermaid2drawml_syntax_error"
+      class = failure_class(first$error$kind)
     )
   }
   first

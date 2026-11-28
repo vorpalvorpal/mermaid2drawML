@@ -179,7 +179,7 @@ test_that("flowchart-full: registered shapes get their Word presets", {
   expected <- c(
     n1 = "rect", n2 = "roundRect", n3 = "roundRect", n4 = "flowChartPredefinedProcess",
     n5 = "can", n6 = "ellipse", n8 = "diamond", n9 = "hexagon",
-    n10 = "parallelogram", n11 = "parallelogram", n12 = "trapezoid", n13 = "trapezoid",
+    n10 = "parallelogram", n11 = "parallelogram", n12 = "trapezoid",
     v2 = "flowChartDocument", v4 = "can", v6 = "parallelogram",
     v9 = "flowChartManualInput", v10 = "flowChartMultidocument"
   )
@@ -505,7 +505,6 @@ test_that("shape_registry() maps Mermaid shape names and aliases to the same Wor
     lean_right = "parallelogram", "lean-r" = "parallelogram", "lean-right" = "parallelogram",
     lean_left = "parallelogram", "lean-l" = "parallelogram", "lean-left" = "parallelogram",
     trapezoid = "trapezoid", "trap-b" = "trapezoid",
-    inv_trapezoid = "trapezoid", "trap-t" = "trapezoid", "inv-trapezoid" = "trapezoid",
     subroutine = "flowChartPredefinedProcess", "fr-rect" = "flowChartPredefinedProcess",
     doc = "flowChartDocument", document = "flowChartDocument",
     docs = "flowChartMultidocument",
@@ -521,7 +520,9 @@ test_that("shape_registry() maps Mermaid shape names and aliases to the same Wor
   }
   expect_true(row_of("lean_left")$flip_h)
   expect_false(row_of("lean_right")$flip_h)
-  expect_true(row_of("inv_trapezoid")$flip_v)
+  # No row flips a shape vertically (Word would turn its text upside down), so
+  # the inverted trapezoids have no row and are drawn from their outline.
+  expect_false(any(.shape_registry$flip_v))
   expect_false(row_of("trapezoid")$flip_v)
   expect_equal(row_of("roundedRect")$adj, "round")
   expect_equal(row_of("lean_right")$adj, "slant")
@@ -609,13 +610,12 @@ test_that("parallelograms and trapezoids take their adjust from the drawn inset"
   pts <- list(
     lean_right    = list(c(20, 60), c(110, 60), c(120, 20), c(30, 20)),
     lean_left     = list(c(30, 60), c(120, 60), c(110, 20), c(20, 20)),
-    trapezoid     = list(c(20, 60), c(120, 60), c(110, 20), c(30, 20)),
-    inv_trapezoid = list(c(30, 60), c(110, 60), c(120, 20), c(20, 20))
+    trapezoid     = list(c(20, 60), c(120, 60), c(110, 20), c(30, 20))
   )
   prst <- c(lean_right = "parallelogram", lean_left = "parallelogram",
-            trapezoid = "trapezoid", inv_trapezoid = "trapezoid")
-  flip_h <- c(lean_right = FALSE, lean_left = TRUE, trapezoid = FALSE, inv_trapezoid = FALSE)
-  flip_v <- c(lean_right = FALSE, lean_left = FALSE, trapezoid = FALSE, inv_trapezoid = TRUE)
+            trapezoid = "trapezoid")
+  flip_h <- c(lean_right = FALSE, lean_left = TRUE, trapezoid = FALSE)
+  flip_v <- c(lean_right = FALSE, lean_left = FALSE, trapezoid = FALSE)
   for (s in names(pts)) {
     n <- registry_shape(s, prim_poly(pts[[s]]))
     xf <- shape_xfrm(n)
@@ -641,14 +641,16 @@ test_that("flowchart-full: adjust values and flips match the drawn shapes", {
   expect_equal(shape_adj(node("n2"))[["adj"]], round(100000 * 5 / 54))
   expect_equal(shape_adj(node("n3"))[["adj"]], 50000)
   # every slanted node has a 19.5 / 39 (or 27 / 54) inset
-  for (id in c("n10", "n11", "n12", "n13")) {
+  for (id in c("n10", "n11", "n12")) {
     expect_equal(shape_adj(node(id))[["adj"]], 50000, info = id)
   }
   expect_equal(shape_adj(node("n9"))[["adj"]], 25000)   # 9.75 / 39
   expect_false(shape_xfrm(node("n10"))$flipH)
   expect_true(shape_xfrm(node("n11"))$flipH)
   expect_false(shape_xfrm(node("n12"))$flipV)
-  expect_true(shape_xfrm(node("n13"))$flipV)
+  # the inverted trapezoid is drawn from its outline, upright
+  expect_false(shape_xfrm(node("n13"))$flipV)
+  expect_true(shape_is_custom(node("n13")))
 })
 
 test_that("no fill or stroke is forced by shape name", {

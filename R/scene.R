@@ -74,7 +74,10 @@
 #                   "line", which runs from the box's top left to its bottom
 #                   right) the flips put its start (head end) and end (tail
 #                   end) where they were drawn: flip_h when the line runs right
-#                   to left, flip_v when it runs bottom to top.
+#                   to left, flip_v when it runs bottom to top. A shape that
+#                   holds text is never flipped vertically (Word turns its
+#                   text upside down), so flip_v is FALSE for it; a
+#                   horizontal flip leaves text alone.
 #   adj        list named numeric vector of preset adjust values, DrawingML
 #                   units, e.g. c(adj = 20000) -> <a:gd name="adj" fmla="val
 #                   20000"/>; numeric(0) means none (the preset's defaults).
@@ -329,10 +332,11 @@ piece_rect <- function(p) {
   m <- prim_matrix(p)
   fb <- frame_box(prim_number(g$x), prim_number(g$y), prim_number(g$w),
                   prim_number(g$h), m)
-  # SVG takes the missing radius from the other one.
+  # The bridge has already given a missing radius the other's value, and SVG
+  # draws square corners when either one is zero.
   rx <- prim_number(g$rx)
-  r <- (if (rx > 0) rx else prim_number(g$ry)) * mat_scale(m)
-  rounded <- r > 0
+  r <- rx * mat_scale(m)
+  rounded <- rx > 0 && prim_number(g$ry) > 0
   new_piece(p, "shape", fb$box, fb$rot,
             prst = if (rounded) "roundRect" else "rect",
             paint = prim_paint(p), closed = TRUE,
@@ -462,11 +466,20 @@ closed_figure <- function(path) {
   }
 )
 
+#' How far (px) a path may stray from a preset and still be drawn as it
+#'
+#' A hundredth of the longer side, or up to half a pixel for a thin shape.
+#' The half pixel is capped at a twentieth of the shorter side so that a
+#' figure a few pixels across (a 3 px diamond) is not taken for an ellipse.
+#' @noRd
+figure_tolerance <- function(box) {
+  max(0.01 * max(box[[3]], box[[4]]), min(0.5, 0.05 * min(box[[3]], box[[4]])))
+}
+
 #' The preset a path draws exactly, or prst NA
 #' @noRd
 path_figure <- function(path, box) {
-  tol <- max(0.5, 0.01 * max(box[[3]], box[[4]]))
-  found <- purrr::reduce(.path_figures, function(hit, f) hit %||% f(path, box, tol),
+  found <- purrr::reduce(.path_figures, function(hit, f) hit %||% f(path, box, figure_tolerance(box)),
                          .init = NULL)
   found %||% list(prst = NA_character_, adj = numeric(), corner_r = NA_real_)
 }
