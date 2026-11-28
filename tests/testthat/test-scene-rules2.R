@@ -292,7 +292,8 @@ test_that("Mermaid's class box: paired outline, dividers in sibling <g>s, texts 
   )
   dividers <- c(in_g(list(mermaid_divider(10, 210, 50)), n = 138, cls = "divider"),
                 in_g(list(mermaid_divider(10, 210, 90)), n = 140, cls = "divider"))
-  items <- generic_items(in_g(c(box, texts, dividers), n = 100, cls = "node default"),
+  items <- generic_items(in_g(c(box, texts, dividers), n = 100, cls = "node default",
+                              unit = unit_node("Animal")),
                          viewBox = c(0, 0, 300, 200))
   s <- shapes_of2(items)
   expect_equal(nrow(s), 3L)

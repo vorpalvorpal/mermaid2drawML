@@ -22,15 +22,22 @@ body_doc <- function(rdocx) officer::docx_body_xml(rdocx)
 
 # -- Signatures ----------------------------------------------------------------
 
-test_that("the wrappers keep their signatures, with mermaid_config just before ...", {
+test_that("the wrappers keep their signatures, the sizing arguments just before ...", {
+  # Positional callers rely on everything up to mermaid_config staying put.
   expect_equal(names(formals(mermaid_to_word)),
                c("mermaid_code", "start_id", "timeout", "orientation", "auto_aspect",
-                 "page_margins_in", "mermaid_config", "..."))
+                 "page_margins_in", "mermaid_config", "max_scale", "page_width_in",
+                 "page_height_in", "..."))
   expect_equal(names(formals(body_add_mermaid)),
                c("doc", "mermaid_code", "start_id", "timeout", "orientation", "auto_aspect",
-                 "page_margins_in", "mermaid_config", "..."))
-  expect_null(formals(mermaid_to_word)$mermaid_config)
-  expect_null(formals(body_add_mermaid)$mermaid_config)
+                 "page_margins_in", "mermaid_config", "max_scale", "page_width_in",
+                 "page_height_in", "..."))
+  for (f in list(mermaid_to_word, body_add_mermaid)) {
+    expect_null(formals(f)$mermaid_config)
+    expect_equal(formals(f)$max_scale, 1)
+    expect_null(formals(f)$page_width_in)
+    expect_null(formals(f)$page_height_in)
+  }
 })
 
 # -- mermaid_to_word() ---------------------------------------------------------
@@ -66,6 +73,28 @@ test_that("mermaid_to_word(code, start_id =, word_font_family =) works as other 
   expect_gt(length(fonts), 0L)
   expect_true(all(xattr(fonts, "w:ascii") == "Myriad Pro"))
   expect_equal(xattr(doc_pr(doc), "id"), "3")
+})
+
+test_that("the sizing arguments give the XML build_diagram_xml() gives for them", {
+  # The call other code makes: the named sizing arguments reach the drawing
+  # exactly as they did when they went through `...`.
+  local_mock_render("default-theme")
+  d <- mermaid_to_word(code, start_id = 5, orientation = "portrait", page_width_in = 6,
+                       page_height_in = 8, word_font_family = "Segoe UI")
+  direct <- build_diagram_xml(fixture_render("default-theme"), start_id = 5L,
+                              page_width_in = 6, page_height_in = 8,
+                              word_font_family = "Segoe UI")
+  expect_identical(d$xml, direct$xml)
+  expect_equal(d$next_id, direct$next_id)
+  expect_equal(d$orientation, "portrait")
+})
+
+test_that("max_scale reaches the drawing", {
+  local_mock_render("default-theme")
+  half <- mermaid_to_word(code, orientation = "portrait", max_scale = 0.5)
+  direct <- build_diagram_xml(fixture_render("default-theme"), max_scale = 0.5,
+                              page_width_in = 6.27, page_height_in = 9.69)
+  expect_identical(half$xml, direct$xml)
 })
 
 test_that("mermaid_config is passed to render_mermaid(config = )", {

@@ -266,6 +266,113 @@ root_ext <- function(doc) {
   c(cx = xnum(e, "cx"), cy = xnum(e, "cy"))
 }
 
+# -- Schema child order --------------------------------------------------------
+#
+# The order the ECMA-376 schemas (and Microsoft's wps/wpg extensions) require
+# for the children of the elements this package writes: element -> its
+# children's ranks in order. "a|b" is a choice: its members share a rank
+# (fills, geometries, a group's members, a path's segments), so they may
+# repeat or alternate among themselves. It lists children the package does
+# not write yet (gradient and pattern fills, hyperlinks, pictures, text
+# fills) so that writing them needs no change here. Optional children Word
+# never needs are listed where they would go, to place what follows them.
+
+.fill_choice <- "a:noFill|a:solidFill|a:gradFill|a:blipFill|a:pattFill|a:grpFill"
+.line_fill_choice <- "a:noFill|a:solidFill|a:gradFill|a:pattFill"
+.effect_choice <- "a:effectLst|a:effectDag"
+.group_members <- "wps:wsp|wpg:grpSp|wpg:graphicFrame|pic:pic|w14:contentPart"
+
+.rpr_base <- c(
+  "w:rStyle", "w:rFonts", "w:b", "w:bCs", "w:i", "w:iCs", "w:caps", "w:smallCaps",
+  "w:strike", "w:dstrike", "w:outline", "w:shadow", "w:emboss", "w:imprint",
+  "w:noProof", "w:snapToGrid", "w:vanish", "w:webHidden", "w:color", "w:spacing",
+  "w:w", "w:kern", "w:position", "w:sz", "w:szCs", "w:highlight", "w:u", "w:effect",
+  "w:bdr", "w:shd", "w:fitText", "w:vertAlign", "w:rtl", "w:cs", "w:em", "w:lang",
+  "w:eastAsianLayout", "w:specVanish", "w:oMath",
+  # Word 2010's run effects follow the standard properties.
+  "w14:glow", "w14:shadow", "w14:reflection", "w14:textOutline", "w14:textFill",
+  "w14:scene3d", "w14:props3d", "w14:ligatures", "w14:numForm", "w14:numSpacing",
+  "w14:stylisticSets", "w14:cntxtAlts",
+  "w:rPrChange"
+)
+
+schema_child_order <- list(
+  "wp:inline" = c("wp:extent", "wp:effectExtent", "wp:docPr", "wp:cNvGraphicFramePr",
+                  "a:graphic"),
+  "wpg:wgp" = c("wpg:cNvPr", "wpg:cNvGrpSpPr", "wpg:grpSpPr", .group_members,
+                "wpg:extLst"),
+  "wpg:grpSp" = c("wpg:cNvPr", "wpg:cNvGrpSpPr", "wpg:grpSpPr", .group_members,
+                  "wpg:extLst"),
+  "wps:wsp" = c("wps:cNvPr", "wps:cNvSpPr|wps:cNvCnPr", "wps:spPr", "wps:style",
+                "wps:extLst", "wps:txbx|wps:linkedTxbx", "wps:bodyPr"),
+  "wps:cNvPr" = c("a:hlinkClick", "a:hlinkHover", "a:extLst"),
+  "wpg:cNvPr" = c("a:hlinkClick", "a:hlinkHover", "a:extLst"),
+  "wps:spPr" = c("a:xfrm", "a:custGeom|a:prstGeom", .fill_choice, "a:ln", .effect_choice,
+                 "a:scene3d", "a:sp3d", "a:extLst"),
+  "wpg:grpSpPr" = c("a:xfrm", .fill_choice, .effect_choice, "a:scene3d", "a:extLst"),
+  "a:xfrm" = c("a:off", "a:ext", "a:chOff", "a:chExt"),
+  "a:ln" = c(.line_fill_choice, "a:prstDash|a:custDash", "a:round|a:bevel|a:miter",
+             "a:headEnd", "a:tailEnd", "a:extLst"),
+  "wps:bodyPr" = c("a:prstTxWarp", "a:noAutofit|a:normAutofit|a:spAutoFit", "a:scene3d",
+                   "a:sp3d|a:flatTx", "a:extLst"),
+  "w:pPr" = c(
+    "w:pStyle", "w:keepNext", "w:keepLines", "w:pageBreakBefore", "w:framePr",
+    "w:widowControl", "w:numPr", "w:suppressLineNumbers", "w:pBdr", "w:shd", "w:tabs",
+    "w:suppressAutoHyphens", "w:kinsoku", "w:wordWrap", "w:overflowPunct",
+    "w:topLinePunct", "w:autoSpaceDE", "w:autoSpaceDN", "w:bidi", "w:adjustRightInd",
+    "w:snapToGrid", "w:spacing", "w:ind", "w:contextualSpacing", "w:mirrorIndents",
+    "w:suppressOverlap", "w:jc", "w:textDirection", "w:textAlignment",
+    "w:textboxTightWrap", "w:outlineLvl", "w:divId", "w:cnfStyle", "w:rPr", "w:sectPr",
+    "w:pPrChange"
+  ),
+  # A paragraph mark's run properties may open with its revision marks.
+  "w:rPr" = c("w:ins", "w:del", "w:moveFrom", "w:moveTo", .rpr_base),
+  "a:custGeom" = c("a:avLst", "a:gdLst", "a:ahLst", "a:cxnLst", "a:rect", "a:pathLst"),
+  "a:path" = "a:close|a:moveTo|a:lnTo|a:arcTo|a:quadBezTo|a:cubicBezTo"
+)
+
+# Namespace URIs by the prefix the table uses.
+schema_ns <- c(
+  dml_ns,
+  pic = "http://schemas.openxmlformats.org/drawingml/2006/picture",
+  w14 = "http://schemas.microsoft.com/office/word/2010/wordml"
+)
+
+# An element's name with the table's prefix for its namespace ("?:name" for
+# a namespace the table does not know).
+schema_name <- function(node) {
+  uri <- xml2::xml_find_chr(node, "namespace-uri(.)")
+  prefix <- names(schema_ns)[match(uri, schema_ns)]
+  paste0(if (is.na(prefix)) "?" else prefix, ":", sub("^.*:", "", xml2::xml_name(node)))
+}
+
+# Problems with the order of `parent`'s element children, as text naming
+# the parent and the child: a child the table does not allow there, or one
+# that comes before a child it must follow.
+child_order_problems <- function(parent, order) {
+  ranks <- strsplit(order, "|", fixed = TRUE)
+  rank_of <- stats::setNames(rep(seq_along(ranks), lengths(ranks)), unlist(ranks))
+  pname <- schema_name(parent)
+  kids <- purrr::map_chr(as.list(xml2::xml_children(parent)), schema_name)
+  r <- unname(rank_of[kids])
+  unknown <- kids[is.na(r)]
+  out <- sprintf("%s: unexpected child %s", pname, unique(unknown))
+  known <- r[!is.na(r)]
+  back <- which(diff(known) < 0)
+  c(out, sprintf("%s: %s comes after %s", pname, kids[!is.na(r)][back + 1L],
+                 kids[!is.na(r)][back]))
+}
+
+# Every order problem in a document, for every element the table lists.
+schema_order_problems <- function(doc) {
+  unique(unlist(purrr::imap(schema_child_order, function(order, el) {
+    parts <- strsplit(el, ":", fixed = TRUE)[[1]]
+    xpath <- sprintf("//*[local-name()='%s' and namespace-uri()='%s']", parts[[2]],
+                     schema_ns[[parts[[1]]]])
+    purrr::map(as.list(xml2::xml_find_all(doc, xpath)), child_order_problems, order = order)
+  })))
+}
+
 # -- Expectations --------------------------------------------------------------
 
 # Every element of `object` within `tol` of `expected` (absolute, unlike the
@@ -512,21 +619,52 @@ generic_doc <- function(prims = list(), ..., viewBox = c(0, 0, 200, 100)) {
 }
 
 # -- Flowchart-style units for hand-built renders ------------------------------
+#
+# The bridge says which element is which diagram unit: an `anc` entry (or,
+# for an edge path, the prim itself) carries `unit = list(kind, id[, start,
+# end])`, with `id` the unit's id in Mermaid's own data. These helpers set
+# `unit` and nothing else that could mark a unit: the elements have neutral
+# ids and classes (no `node`, `cluster`, `edgeLabel` or `edgePaths` class, no
+# `flowchart-<id>-<n>` id, no `data-id` or `data-edge`), so a test built
+# with them passes only when units are read from `unit`.
+
+unit_node <- function(id) list(kind = "node", id = id)
+unit_subgraph <- function(id) list(kind = "subgraph", id = id)
+unit_edge <- function(id, start, end) list(kind = "edge", id = id, start = start, end = end)
+unit_edge_label <- function(id, start, end) {
+  list(kind = "edge_label", id = id, start = start, end = end)
+}
+
+# The db id of a node drawn as `flowchart-<id>-<n>`, the default unit id of
+# the helpers that take a DOM id.
+dom_node_id <- function(dom_id) sub("^flowchart-", "", sub("-\\d+$", "", dom_id))
+
+# The two ends of a Mermaid edge id `L_<start>_<end>_<n>` (an end holding an
+# underscore must be given explicitly).
+edge_ends <- function(edge_id) {
+  m <- regmatches(edge_id, regexec("^L_(.+)_(.+?)_\\d+$", edge_id))[[1]]
+  if (length(m) == 3L) m[2:3] else c(NA_character_, NA_character_)
+}
 
 anc_root <- function() list(list(id = "", cls = "root"))
-anc_node <- function(dom_id, cls = "node default") {
-  c(anc_root(), list(list(id = "", cls = "nodes"), list(id = dom_id, cls = cls)))
+anc_node <- function(dom_id, cls = "default", id = dom_node_id(dom_id)) {
+  c(anc_root(), list(list(id = "", cls = "nodes"),
+                     list(id = "", cls = cls, unit = unit_node(id))))
 }
 anc_label <- function(anc) c(anc, list(list(id = "", cls = "label")))
-anc_edge <- function() c(anc_root(), list(list(id = "", cls = "edgePaths")))
+anc_edge <- function() c(anc_root(), list(list(id = "", cls = "paths")))
 anc_cluster <- function(id) {
   c(anc_root(), list(list(id = "", cls = "clusters"),
-                     list(id = id, cls = "cluster", data = list(look = "classic"))))
+                     list(id = "", cls = "frame", data = list(look = "classic"),
+                          unit = unit_subgraph(id))))
 }
 anc_cluster_label <- function(id) c(anc_cluster(id), list(list(id = "", cls = "cluster-label")))
-anc_edge_label <- function(edge_id) {
-  c(anc_root(), list(list(id = "", cls = "edgeLabels"), list(id = "", cls = "edgeLabel"),
-                     list(id = "", cls = "label", data = list(id = edge_id))))
+anc_edge_label <- function(edge_id, start = edge_ends(edge_id)[[1]],
+                           end = edge_ends(edge_id)[[2]]) {
+  c(anc_root(), list(list(id = "", cls = "edgeLabels"),
+                     list(id = "", cls = "label-box",
+                          unit = unit_edge_label(edge_id, start, end)),
+                     list(id = "", cls = "label")))
 }
 
 db_node <- function(id, shape = "squareRect", dom_id = paste0("flowchart-", id, "-0"),
@@ -543,26 +681,32 @@ db_edge <- function(start, end, id = paste0("L_", start, "_", end, "_0")) {
 
 mini_db <- function(nodes = list(), edges = list()) list(nodes = nodes, edges = edges)
 
-# An edge path prim as Mermaid draws it (open, stroked, arrow at the end).
-prim_edge <- function(d, edge_id, marker_end = "flowchart-v2-pointEnd", ...) {
-  prim_path(d, id = edge_id, data = list(edge = "true", et = "edge", id = edge_id),
-            anc = anc_edge(), fill = NULL, stroke = "#333333",
-            marker_end = marker_end, ...)
+# An edge path prim as Mermaid draws it (open, stroked, arrow at the end); the
+# bridge puts the edge's `unit` on the path itself.
+prim_edge <- function(d, edge_id, marker_end = "flowchart-v2-pointEnd",
+                      start = edge_ends(edge_id)[[1]], end = edge_ends(edge_id)[[2]],
+                      ...) {
+  p <- prim_path(d, anc = anc_edge(), fill = NULL, stroke = "#333333",
+                 marker_end = marker_end, ...)
+  p$unit <- unit_edge(edge_id, start, end)
+  p
 }
 
 # -- Step 2: DOM serials (A2) and marker definitions (A1) ----------------------
 
 # One `anc` entry with its DOM serial `n` (an unnamed <g> has id and cls "").
-anc_g <- function(n, cls = "", id = "", data = NULL) {
+# `unit`: a unit_*() list when the element is a diagram unit.
+anc_g <- function(n, cls = "", id = "", data = NULL, unit = NULL) {
   a <- list(id = id, cls = cls, n = as.integer(n))
   if (!is.null(data)) a$data <- data
+  if (!is.null(unit)) a$unit <- unit
   a
 }
 
 # Wrap prims in one <g> with serial `n`: its entry goes first in each prim's
 # `anc` (outermost first), so in_g(in_g(ps, 3), 2) puts ps in g 3 inside g 2.
-in_g <- function(prims, n, cls = "", id = "", data = NULL) {
-  g <- anc_g(n, cls = cls, id = id, data = data)
+in_g <- function(prims, n, cls = "", id = "", data = NULL, unit = NULL) {
+  g <- anc_g(n, cls = cls, id = id, data = data, unit = unit)
   purrr::map(prims, function(p) {
     p$anc <- c(list(g), p$anc %|null|% list())
     p
@@ -679,20 +823,22 @@ marker_er_only_one_start <- function() {
 }
 
 # A one-prim node unit (shape prim + centred label) for a db shape test.
-node_prims <- function(dom_id, shape_prim, label = "Label", box = NULL) {
+# `id`: the node's db id (the unit id); by default the one in `dom_id`.
+node_prims <- function(dom_id, shape_prim, label = "Label", box = NULL,
+                       id = dom_node_id(dom_id)) {
   box <- box %|null|% unlist(shape_prim$bbox)
   tw <- min(40, box[3] / 2)
   th <- min(16, box[4] / 2)
-  shape_prim$anc <- anc_node(dom_id)
+  shape_prim$anc <- anc_node(dom_id, id = id)
   list(shape_prim,
        prim_text(label, x = box[1] + (box[3] - tw) / 2, y = box[2] + (box[4] - th) / 2,
-                 w = tw, h = th, anc = anc_label(anc_node(dom_id))))
+                 w = tw, h = th, anc = anc_label(anc_node(dom_id, id = id))))
 }
 
 # A render with one flowchart node `id` of db shape `shape`, drawn by `prim`.
 one_node_render <- function(shape, prim, id = "X", label = "Label",
                             viewBox = c(0, 0, 200, 100)) {
   dom <- paste0("flowchart-", id, "-0")
-  mini_render(node_prims(dom, prim, label = label), viewBox = viewBox,
+  mini_render(node_prims(dom, prim, label = label, id = id), viewBox = viewBox,
               db = mini_db(list(db_node(id, shape = shape, dom_id = dom, label = label))))
 }

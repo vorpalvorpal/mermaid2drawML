@@ -402,7 +402,7 @@ test_that("alt text, titles, names and labels with & < \" are escaped", {
 
   dom <- "flowchart-x-0"
   label <- "Tom & \"Jerry\" <3>"
-  prims <- node_prims(dom, prim_rect(20, 20, 100, 40), label = label)
+  prims <- node_prims(dom, prim_rect(20, 20, 100, 40), label = label, id = odd)
   db <- mini_db(list(db_node(odd, dom_id = dom, label = label)))
   res <- build_diagram_xml(mini_render(prims, db = db))
   doc <- dml_doc(res$xml)

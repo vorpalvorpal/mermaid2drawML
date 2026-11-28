@@ -548,15 +548,14 @@ test_that("sibling scopes with the same class get unique names in document order
 })
 
 test_that("items of a unit are not regrouped by scope", {
-  dom <- "flowchart-X-0"
   anc <- list(anc_g(1, cls = "root"), anc_g(2, cls = "nodes"),
-              anc_g(3, id = dom, cls = "node default"))
+              anc_g(3, cls = "default", unit = unit_node("X")))
   prims <- list(
     prim_ellipse(60, 50, 40, anc = anc),
     prim_ellipse(60, 50, 35, anc = anc),
     prim_text("Ring", x = 45, y = 42, w = 30, h = 16, anc = c(anc, list(anc_g(4, cls = "label"))))
   )
-  db <- mini_db(list(db_node("X", shape = "doublecircle", dom_id = dom)))
+  db <- mini_db(list(db_node("X", shape = "doublecircle")))
   items <- build_scene(mini_render(prims, db = db))$items
   expect_false(any(grepl("^mermaid:group:", items$name)))
   expect_equal(item_named(items, "mermaid:node:X")$kind, "group")

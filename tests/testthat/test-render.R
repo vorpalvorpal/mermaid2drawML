@@ -87,43 +87,7 @@ test_that("as_mermaid_render rejects something that is not a list", {
 
 # ---- render_mermaid() with a mocked processx::run ---------------------------
 
-fixture_stdout <- function(name) {
-  paste0("[", paste(readLines(fixture_path(name), warn = FALSE), collapse = "\n"), "]")
-}
-
-# Install mocks for node/browser lookup and processx::run. Returns an
-# environment that records the call, including the contents of the input file
-# and of any --config file at the time of the call.
-local_mock_bridge <- function(result = NULL, browser = NA_character_,
-                              node_dir = withr::local_tempdir(.local_envir = env),
-                              env = parent.frame()) {
-  result <- result %||% list(status = 0L, stdout = fixture_stdout("pie"),
-                             stderr = "", timeout = FALSE)
-  st <- rlang::env(call = NULL, input = NULL, input_existed = NA,
-                   config = NULL, node_dir = node_dir)
-  testthat::local_mocked_bindings(
-    check_mermaid2drawml = function() invisible(TRUE),
-    .find_browser = function(...) browser,
-    .node_dir = function() node_dir,
-    .env = env
-  )
-  testthat::local_mocked_bindings(
-    run = function(command, args = character(), ...) {
-      st$call <- list(command = command, args = args, ...)
-      last <- utils::tail(args, 1L)
-      st$input_existed <- file.exists(last)
-      if (st$input_existed) st$input <- paste(readLines(last, warn = FALSE), collapse = "\n")
-      i <- match("--config", args)
-      if (!is.na(i) && file.exists(args[i + 1L])) {
-        st$config <- jsonlite::fromJSON(args[i + 1L], simplifyVector = FALSE)
-      }
-      result
-    },
-    .package = "processx",
-    .env = env
-  )
-  st
-}
+# local_mock_bridge() and fixture_stdout() are in helper-render.R.
 
 test_that("render_mermaid returns a mermaid_render built from the bridge array", {
   local_mock_bridge()

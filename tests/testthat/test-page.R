@@ -456,3 +456,55 @@ test_that("an explicit start_id is passed through unchanged", {
   body_add_mermaid(officer::read_docx(), "flowchart TB\n A --> B", start_id = 42L)
   expect_equal(as.integer(seen$start_id), 42L)
 })
+
+# ── Orientation "auto" from the size and scale actually used ────────────────
+
+# A diagram 700 px wide and 200 high: 7.3 in at natural size, too wide for a
+# portrait page's 6.27 in; 3.6 in at half size, which fits.
+wide_700 <- function() {
+  generic_render(list(prim_rect(0, 0, 700, 200, fill = "#ECECFF")),
+                 viewBox = c(0, 0, 700, 200))
+}
+
+emu_per_in <- 914400
+
+test_that("auto stays portrait when max_scale makes the diagram fit, else turns landscape", {
+  local_mock_render(wide_700())
+  half <- mermaid_to_word("graph LR", max_scale = 0.5)
+  full <- mermaid_to_word("graph LR", max_scale = 1)
+  expect_equal(half$orientation, "portrait")
+  expect_equal(full$orientation, "landscape")
+  # The drawing is the size that decision assumed, and fits its page.
+  expect_near(inline_extent(dml_doc(half$xml))[["cx"]], 700 * 0.5 * 9525, tol = 1)
+  expect_lte(inline_extent(dml_doc(half$xml))[["cx"]],
+             .content_size("portrait", NULL)[["width"]] * emu_per_in)
+  expect_near(inline_extent(dml_doc(full$xml))[["cx"]], 700 * 9525, tol = 1)
+  expect_lte(inline_extent(dml_doc(full$xml))[["cx"]],
+             .content_size("landscape", NULL)[["width"]] * emu_per_in)
+})
+
+test_that("body_add_mermaid() decides auto with its max_scale", {
+  local_mock_render(wide_700())
+  doc <- doc_two_pars()
+  before <- n_sect(body_of(doc))
+  half <- body_add_mermaid(doc_two_pars(), "graph LR", max_scale = 0.5)
+  expect_equal(n_sect(body_of(half)), before)
+  full <- body_add_mermaid(doc_two_pars(), "graph LR", max_scale = 1)
+  sects <- xml2::xml_find_all(body_of(full), "//sectPr")
+  expect_true(any(vapply(as.list(sects), is_landscape_sect, logical(1))))
+})
+
+test_that("with page_width_in and page_height_in given, auto adds no section", {
+  # reading: an explicit page size is the space the caller has, so "auto" has
+  # nothing to decide: the drawing is fitted to that size and the page is
+  # left as it is (portrait, no section of its own).
+  local_mock_render(wide_700())
+  d <- mermaid_to_word("graph LR", page_width_in = 6, page_height_in = 8)
+  expect_equal(d$orientation, "portrait")
+  expect_lte(inline_extent(dml_doc(d$xml))[["cx"]], 6 * emu_per_in + 1)
+
+  doc <- doc_two_pars()
+  before <- n_sect(body_of(doc))
+  doc <- body_add_mermaid(doc, "graph LR", page_width_in = 6, page_height_in = 8)
+  expect_equal(n_sect(body_of(doc)), before)
+})

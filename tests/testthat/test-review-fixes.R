@@ -1,35 +1,7 @@
 # Regression tests for the second review's bugs. Hand-built renders and
 # mocked bridge calls (helper-xml.R, helper-render.R, test-render.R's idioms).
 
-# ---- a mocked bridge (the same idiom as test-render.R) ---------------------------
-
-pie_stdout <- function() {
-  paste0("[", paste(readLines(fixture_path("pie"), warn = FALSE), collapse = "\n"), "]")
-}
-
-# Mock node/browser lookup and processx::run; returns an environment that
-# records the call.
-local_bridge <- function(result = NULL, env = parent.frame()) {
-  result <- result %||% list(status = 0L, stdout = pie_stdout(), stderr = "",
-                             timeout = FALSE)
-  st <- rlang::env(call = NULL)
-  node_dir <- withr::local_tempdir(.local_envir = env)
-  testthat::local_mocked_bindings(
-    check_mermaid2drawml = function() invisible(TRUE),
-    .find_browser = function(...) NA_character_,
-    .node_dir = function() node_dir,
-    .env = env
-  )
-  testthat::local_mocked_bindings(
-    run = function(command, args = character(), ...) {
-      st$call <- list(command = command, args = args, ...)
-      result
-    },
-    .package = "processx",
-    .env = env
-  )
-  st
-}
+# The mocked bridge, local_mock_bridge(), is in helper-render.R.
 
 # ---- a shape that holds text is never flipped vertically --------------------
 
@@ -92,12 +64,8 @@ test_that("a horizontally flipped registry shape still uses its preset", {
 
 # ---- timeout and failure kinds ----------------------------------------------
 
-failure_stdout <- function(error) {
-  as.character(jsonlite::toJSON(list(list(ok = FALSE, error = error)), auto_unbox = TRUE))
-}
-
 mock_failure <- function(error, env = parent.frame()) {
-  local_bridge(list(status = 0L, stdout = failure_stdout(error), stderr = "",
+  local_mock_bridge(list(status = 0L, stdout = failure_stdout(error), stderr = "",
                          timeout = FALSE), env = env)
 }
 
@@ -130,7 +98,7 @@ timeout_arg <- function(st) {
 }
 
 test_that("the bridge's in-page timeout is shorter than the whole-render timeout", {
-  st <- local_bridge()
+  st <- local_mock_bridge()
   render_mermaid("flowchart TD\n A --> B", timeout = 120)
   ms <- timeout_arg(st)
   expect_false(is.na(ms))
@@ -140,7 +108,7 @@ test_that("the bridge's in-page timeout is shorter than the whole-render timeout
 })
 
 test_that("a very short timeout still leaves the bridge at least five seconds", {
-  st <- local_bridge()
+  st <- local_mock_bridge()
   render_mermaid("flowchart TD\n A --> B", timeout = 3)
   expect_gte(timeout_arg(st), 5000)
 })
@@ -305,7 +273,7 @@ test_that("line breaks and tabs in alt text survive a round trip through XML", {
 
 test_that("an empty config sends no --config", {
   for (cfg in list(NULL, list())) {
-    st <- local_bridge()
+    st <- local_mock_bridge()
     render_mermaid("flowchart TD\n A --> B", config = cfg)
     expect_false("--config" %in% st$call$args)
   }
@@ -313,14 +281,14 @@ test_that("an empty config sends no --config", {
 
 # Run render_mermaid() with a mocked bridge, keeping the --config file's text.
 config_text <- function(config) {
-  st <- local_bridge()
+  st <- local_mock_bridge()
   seen <- rlang::env(text = NULL)
   testthat::local_mocked_bindings(
     run = function(command, args = character(), ...) {
       i <- match("--config", args)
       seen$text <- paste(readLines(args[[i + 1L]], warn = FALSE, encoding = "UTF-8"),
                          collapse = "")
-      list(status = 0L, stdout = pie_stdout(), stderr = "", timeout = FALSE)
+      list(status = 0L, stdout = fixture_stdout("pie"), stderr = "", timeout = FALSE)
     },
     .package = "processx"
   )
@@ -344,7 +312,7 @@ test_that("config writes null members as null, numbers in full and scalars as sc
 # ---- UTF-8 output ------------------------------------------------------------
 
 test_that("the bridge's output is read as UTF-8", {
-  st <- local_bridge()
+  st <- local_mock_bridge()
   render_mermaid("flowchart TD\n A --> B")
   expect_equal(st$call$encoding, "UTF-8")
 })
@@ -355,7 +323,7 @@ test_that("non-ASCII label text comes back intact", {
               role = "flowchart-v2", viewBox = list(0, 0, 200, 100),
               prims = list(c(list(i = 0L), prim_text(label, 10, 10, 80, 20))), db = NULL)
   out <- paste0("[", jsonlite::toJSON(raw, auto_unbox = TRUE, null = "null", digits = NA), "]")
-  local_bridge(list(status = 0L, stdout = out, stderr = "", timeout = FALSE))
+  local_mock_bridge(list(status = 0L, stdout = out, stderr = "", timeout = FALSE))
   r <- render_mermaid("flowchart TD\n A --> B")
   expect_equal(r$prims[[1]]$rows[[1]]$runs[[1]]$t, label)
 })

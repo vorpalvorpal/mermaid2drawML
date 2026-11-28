@@ -310,39 +310,39 @@ test_that("erDiagram: entities are units named after their db id", {
 
 # -- Units in hand-built renders -----------------------------------------------
 
-test_that("a node joins the db on domId and is named after the db id", {
+test_that("a node is named after its unit's id, and takes its db shape by that id", {
   r <- one_node_render("squareRect", prim_rect(20, 20, 100, 40), id = "Start")
   items <- build_scene(r)$items
   it <- one_item(items, node_name("Start"))
   expect_identical(it$label, "Label")
+  expect_equal(it$prst, "rect")
 })
 
-test_that("a node with no domId joins the db on id (ER, kanban, requirement)", {
-  dom <- "entity-A-0"
-  prims <- node_prims(dom, prim_rect(20, 20, 100, 40), label = "A")
+test_that("a node's name is the unit id even when it looks like a DOM id (ER, kanban)", {
+  # ER entities, kanban items and requirements have db ids such as
+  # entity-A-0; the unit id is that db id, used as it is.
+  prims <- node_prims("e", prim_rect(20, 20, 100, 40), label = "A", id = "entity-A-0")
   db <- mini_db(list(db_node("entity-A-0", shape = "erBox", dom_id = NULL, label = "A")))
   items <- build_scene(mini_render(prims, db = db, type = "er"))$items
   one_item(items, node_name("entity-A-0"))
 })
 
-test_that("without a db match the id loses its flowchart- prefix and -<n> suffix", {
-  prims <- node_prims("flowchart-my_node-12", prim_rect(20, 20, 100, 40))
+test_that("without a db a unit is still named after its unit id", {
+  prims <- node_prims("n", prim_rect(20, 20, 100, 40), id = "my_node")
   items <- build_scene(mini_render(prims, db = NULL))$items
   one_item(items, node_name("my_node"))
 })
 
 test_that("ids with underscores keep their edges and edge labels", {
-  nodes <- c(node_prims("flowchart-my_node-0", prim_rect(10, 10, 60, 30), "one"),
-             node_prims("flowchart-b-1", prim_rect(130, 10, 60, 30), "two"))
-  edge <- prim_edge("M70,25 L130,25", "L_my_node_b_0")
+  nodes <- c(node_prims("n1", prim_rect(10, 10, 60, 30), "one", id = "my_node"),
+             node_prims("n2", prim_rect(130, 10, 60, 30), "two", id = "b"))
+  edge <- prim_edge("M70,25 L130,25", "L_my_node_b_0", start = "my_node", end = "b")
+  lbl_anc <- anc_edge_label("L_my_node_b_0", start = "my_node", end = "b")
   lbl <- list(
-    prim_rect(90, 15, 20, 20, anc = anc_edge_label("L_my_node_b_0"), html = TRUE,
-              fill = "#E8E8E8", stroke = NULL),
-    prim_text("go", x = 92, y = 17, w = 16, h = 16, anc = anc_edge_label("L_my_node_b_0"))
+    prim_rect(90, 15, 20, 20, anc = lbl_anc, html = TRUE, fill = "#E8E8E8", stroke = NULL),
+    prim_text("go", x = 92, y = 17, w = 16, h = 16, anc = lbl_anc)
   )
-  db <- mini_db(list(db_node("my_node", dom_id = "flowchart-my_node-0"),
-                     db_node("b", dom_id = "flowchart-b-1")),
-                list(db_edge("my_node", "b")))
+  db <- mini_db(list(db_node("my_node"), db_node("b")), list(db_edge("my_node", "b")))
   items <- build_scene(mini_render(c(list(edge), nodes, lbl), db = db))$items
   one_item(items, node_name("my_node"))
   e <- one_item(items, edge_name("my_node", "b"))
@@ -352,9 +352,10 @@ test_that("ids with underscores keep their edges and edge labels", {
   expect_identical(l$label, "go")
 })
 
-test_that("a path under edgePaths is an edge even without data-edge, and is never filled", {
-  p <- prim_path("M70,25 L130,25 L130,60 Z", id = "L_a_b_0", data = list(id = "L_a_b_0"),
-                 anc = anc_edge(), fill = "#FF0000", stroke = "#333333")
+test_that("an edge unit is never filled, even when its path is closed and filled", {
+  p <- prim_path("M70,25 L130,25 L130,60 Z", anc = anc_edge(), fill = "#FF0000",
+                 stroke = "#333333")
+  p$unit <- unit_edge("L_a_b_0", "a", "b")
   nodes <- c(node_prims("flowchart-a-0", prim_rect(10, 10, 60, 30)),
              node_prims("flowchart-b-1", prim_rect(130, 10, 60, 30)))
   db <- mini_db(list(db_node("a", dom_id = "flowchart-a-0"), db_node("b", dom_id = "flowchart-b-1")),
@@ -438,6 +439,191 @@ test_that("a subgraph with no visible rect still groups its members, with no bac
   expect_equal(nrow(item_named(items, "mermaid:subgraph_bg:S")), 0L)
   expect_equal(item_named(items, node_name("A"))$parent, "mermaid:subgraph:S")
   expect_equal(item_named(items, node_name("B"))$parent, "mermaid:subgraph:S")
+})
+
+# -- Units are what the bridge's `unit` field says -----------------------------
+
+# Names that only a unit gets.
+unit_names_in <- function(items) {
+  items$name[!is.na(items$name) &
+               grepl("^mermaid:(node|subgraph|subgraph_bg|edge|edge_label|edge_group):",
+                     items$name)]
+}
+
+# Every text row of every item.
+label_rows <- function(items) unlist(strsplit(items$label[nzchar(items$label)], "\n", fixed = TRUE))
+
+test_that("prims under an element whose unit is a node are that node", {
+  root <- list(anc_g(1, cls = "root"))
+  a <- c(root, list(anc_g(2, unit = unit_node("N1"))))
+  b <- c(root, list(anc_g(3, unit = unit_node("N2"))))
+  prims <- list(
+    prim_rect(10, 20, 60, 30, anc = a),
+    prim_text("One", x = 20, y = 27, w = 40, h = 16, anc = c(a, list(anc_g(4)))),
+    prim_rect(110, 20, 60, 30, anc = b),
+    prim_text("Two", x = 120, y = 27, w = 40, h = 16, anc = c(b, list(anc_g(5))))
+  )
+  db <- mini_db(list(db_node("N1"), db_node("N2")))
+  items <- build_scene(mini_render(prims, db = db))$items
+  # Elements alike in all but their unit are still two nodes.
+  expect_identical(one_item(items, node_name("N1"))$label, "One")
+  expect_identical(one_item(items, node_name("N2"))$label, "Two")
+})
+
+test_that("prims under an element whose unit is a subgraph are its background and title", {
+  sg <- list(anc_g(1, cls = "root"), anc_g(5, unit = unit_subgraph("S")))
+  prims <- c(
+    list(prim_rect(5, 5, 190, 90, anc = sg, fill = "#FFFFDE", stroke = "#AAAA33"),
+         prim_text("Sub", x = 85, y = 7, w = 30, h = 16, anchor = "start",
+                   anc = c(sg, list(anc_g(6))))),
+    node_prims("a", prim_rect(20, 30, 60, 30), id = "A")
+  )
+  db <- mini_db(list(db_node("S", shape = "rect", dom_id = NULL, is_group = TRUE),
+                     db_node("A", parent = "S")))
+  items <- build_scene(mini_render(prims, db = db))$items
+  expect_equal(one_item(items, "mermaid:subgraph:S")$kind, "group")
+  kids <- children_of(items, "mermaid:subgraph:S")
+  expect_equal(kids$name[1], "mermaid:subgraph_bg:S")
+  expect_identical(item_named(items, "mermaid:subgraph_bg:S")$label, "Sub")
+  expect_equal(item_named(items, node_name("A"))$parent, "mermaid:subgraph:S")
+})
+
+test_that("an edge label unit is named after the ends its unit gives", {
+  # No db edges: the name can only come from the unit's start and end.
+  lbl <- list(anc_g(1, cls = "root"),
+              anc_g(7, unit = unit_edge_label("L_P_Q_0", "P", "Q")))
+  prims <- list(
+    prim_rect(10, 10, 180, 60, fill = "#00AA00"),
+    prim_rect(90, 30, 30, 20, anc = lbl, html = TRUE, fill = "#E8E8E8", stroke = NULL),
+    prim_text("lbl", x = 92, y = 32, w = 26, h = 16, anc = c(lbl, list(anc_g(8))))
+  )
+  items <- build_scene(mini_render(prims, db = mini_db()))$items
+  l <- one_item(items, "mermaid:edge_label:P:Q")
+  expect_identical(l$label, "lbl")
+})
+
+test_that("an edge path whose prim carries an edge unit is mermaid:edge:<start>-<end>", {
+  edge <- prim_path("M10,50 L190,50", anc = list(anc_g(1, cls = "root")), fill = NULL,
+                    stroke = "#333333")
+  edge$unit <- unit_edge("L_P_Q_0", "P", "Q")
+  items <- build_scene(mini_render(list(edge, prim_rect(10, 10, 20, 20)), db = NULL))$items
+  e <- one_item(items, edge_name("P", "Q"))
+  expect_true(is.na(e$fill))
+})
+
+test_that("an element with a unit's class or DOM id but no unit is not a unit", {
+  # What Mermaid's DOM marks, without the bridge's unit field: the classes
+  # node, cluster, edgeLabel and edgePaths, flowchart-<id>-<n> ids, data-id
+  # and data-edge. None of these alone makes a unit.
+  root <- list(anc_g(1, cls = "root"))
+  node_anc <- function(dom, n) c(root, list(anc_g(2, cls = "nodes"),
+                                            anc_g(n, id = dom, cls = "node default")))
+  cluster <- c(root, list(anc_g(3, cls = "clusters"),
+                          anc_g(4, id = "S", cls = "cluster", data = list(look = "classic"))))
+  lbl <- c(root, list(anc_g(20, cls = "edgeLabels"), anc_g(21, cls = "edgeLabel"),
+                      anc_g(22, cls = "label", data = list(id = "L_A_B_0"))))
+  prims <- list(
+    prim_rect(5, 5, 290, 90, anc = cluster, fill = "#FFFFDE"),
+    prim_path("M70,40 L130,40", id = "L_A_B_0",
+              data = list(edge = "true", et = "edge", id = "L_A_B_0"),
+              anc = c(root, list(anc_g(10, cls = "edgePaths"))), fill = NULL,
+              stroke = "#333333"),
+    prim_text("go", x = 90, y = 42, w = 20, h = 16, anc = lbl),
+    prim_rect(10, 25, 60, 30, anc = node_anc("flowchart-A-0", 30)),
+    prim_text("A", x = 30, y = 32, w = 20, h = 16,
+              anc = c(node_anc("flowchart-A-0", 30), list(anc_g(31, cls = "label")))),
+    prim_rect(130, 25, 60, 30, anc = node_anc("flowchart-B-1", 40)),
+    prim_text("B", x = 150, y = 32, w = 20, h = 16,
+              anc = c(node_anc("flowchart-B-1", 40), list(anc_g(41, cls = "label"))))
+  )
+  db <- mini_db(list(db_node("S", shape = "rect", dom_id = NULL, is_group = TRUE),
+                     db_node("A", parent = "S"), db_node("B", parent = "S")),
+                list(db_edge("A", "B")))
+  items <- build_scene(mini_render(prims, db = db, viewBox = c(0, 0, 300, 100)))$items
+  expect_length(unit_names_in(items), 0L)
+  # Everything is still drawn, as loose items.
+  expect_true(all(c("A", "B", "go") %in% label_rows(items)))
+})
+
+test_that("a node in a subgraph in a subgraph nests in both", {
+  root <- list(anc_g(1, cls = "root"))
+  outer <- c(root, list(anc_g(2, unit = unit_subgraph("Outer"))))
+  inner <- c(root, list(anc_g(3, unit = unit_subgraph("Inner"))))
+  # The node's element sits inside the inner subgraph's: the innermost unit
+  # owns the prims.
+  a <- c(inner, list(anc_g(4, unit = unit_node("A"))))
+  prims <- list(
+    prim_rect(5, 5, 290, 140, anc = outer, fill = "#FFFFDE"),
+    prim_rect(20, 30, 160, 100, anc = inner, fill = "#DDEEFF"),
+    prim_rect(40, 60, 60, 30, anc = a),
+    prim_text("A", x = 60, y = 67, w = 20, h = 16, anc = c(a, list(anc_g(5)))),
+    prim_rect(200, 60, 60, 30, anc = c(root, list(anc_g(6, unit = unit_node("B")))))
+  )
+  db <- mini_db(list(db_node("Outer", shape = "rect", dom_id = NULL, is_group = TRUE),
+                     db_node("Inner", shape = "rect", dom_id = NULL, is_group = TRUE,
+                             parent = "Outer"),
+                     db_node("A", parent = "Inner"), db_node("B", parent = "Outer")))
+  for (with_db in c(TRUE, FALSE)) {
+    items <- build_scene(mini_render(prims, db = if (with_db) db,
+                                     viewBox = c(0, 0, 300, 150)))$items
+    info <- paste("with db:", with_db)
+    expect_identical(one_item(items, node_name("A"))$label, "A")
+    expect_equal(item_named(items, node_name("A"))$parent, "mermaid:subgraph:Inner",
+                 info = info)
+    expect_equal(item_named(items, "mermaid:subgraph:Inner")$parent, "mermaid:subgraph:Outer",
+                 info = info)
+    expect_equal(item_named(items, node_name("B"))$parent, "mermaid:subgraph:Outer",
+                 info = info)
+    expect_true(is.na(item_named(items, "mermaid:subgraph:Outer")$parent), info = info)
+    # The inner subgraph's background is its own rect, not the node's.
+    bg <- item_named(items, "mermaid:subgraph_bg:Inner")
+    expect_equal(c(bg$x, bg$y, bg$w, bg$h), c(20, 30, 160, 100), info = info)
+  }
+})
+
+test_that("two edges with the same ends keep their own groups and labels", {
+  nodes <- c(node_prims("a", prim_rect(10, 10, 60, 40), id = "A"),
+             node_prims("b", prim_rect(130, 10, 60, 40), id = "B"))
+  edges <- list(
+    prim_edge("M70,20 L118,20", "L_A_B_0", marker_end = "flowchart-v2-crossEnd"),
+    prim_edge("M70,40 L118,40", "L_A_B_1", marker_end = "flowchart-v2-crossEnd")
+  )
+  label <- function(id, text, y) {
+    anc <- anc_edge_label(id, "A", "B")
+    list(prim_rect(85, y, 30, 12, anc = anc, html = TRUE, fill = "#E8E8E8", stroke = NULL),
+         prim_text(text, x = 87, y = y, w = 26, h = 12, anc = anc))
+  }
+  db <- mini_db(list(db_node("A"), db_node("B")),
+                list(db_edge("A", "B", id = "L_A_B_0"), db_edge("A", "B", id = "L_A_B_1")))
+  r <- mini_render(c(edges, label("L_A_B_0", "one", 14), label("L_A_B_1", "two", 34), nodes),
+                   db = db, markers = list("flowchart-v2-crossEnd" = marker_cross_end()))
+  items <- build_scene(r)$items
+  groups <- items$name[items$kind == "group" &
+                         grepl("^mermaid:edge_group:A-B(#[0-9]+)?$", items$name)]
+  expect_length(groups, 2L)
+  expect_false(anyDuplicated(groups) > 0L)
+  for (g in groups) {
+    kids <- children_of(items, g)
+    expect_equal(kids$name, c("mermaid:edge:A-B", "mermaid:marker:flowchart-v2-crossEnd"),
+                 info = g)
+  }
+  labels <- item_named(items, "mermaid:edge_label:A:B")
+  expect_equal(sort(labels$label), c("one", "two"))
+})
+
+test_that("a diagram with no unit anywhere is drawn from its loose items", {
+  prims <- c(
+    in_g(list(prim_rect(10, 10, 60, 30), prim_text("one", x = 20, y = 17, w = 40, h = 16)),
+         n = 2),
+    in_g(list(prim_rect(130, 10, 60, 30), prim_text("two", x = 140, y = 17, w = 40, h = 16)),
+         n = 3),
+    list(prim_path("M70,25 L130,25", fill = NULL, stroke = "#333333"))
+  )
+  db <- mini_db(list(db_node("A"), db_node("B")), list(db_edge("A", "B")))
+  items <- build_scene(mini_render(prims, db = db))$items
+  expect_length(unit_names_in(items), 0L)
+  expect_true(all(c("one", "two") %in% label_rows(items)))
+  expect_equal(sum(items$kind %in% c("shape", "line")), 3L)
 })
 
 test_that("a registered node takes its box from all its prims and paint from the filled one", {
