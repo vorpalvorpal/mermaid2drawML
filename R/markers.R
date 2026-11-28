@@ -213,6 +213,9 @@ marker_shapes <- function(spec, id, m, scale, piece) {
   shapes <- purrr::list_rbind(purrr::map(prims, prim_piece))
   if (is.null(shapes)) return(NULL)
   shapes$name <- rep(paste0("mermaid:marker:", id), nrow(shapes))
+  # A marker's gradients are given in its content coordinates.
+  shapes$fill_grad <- purrr::map(shapes$fill_grad, gradient_through, m = m)
+  shapes$stroke_grad <- purrr::map(shapes$stroke_grad, gradient_through, m = m)
   # Every part of a marker is a shape item, a stroke too: it keeps
   # the line preset and flips, but is not a line of the diagram.
   shapes$kind[shapes$kind == "line"] <- "shape"

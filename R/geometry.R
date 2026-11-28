@@ -548,6 +548,25 @@ path_segments <- function(path) {
   seg[seg$cmd != "M" & !(seg$cmd == "Z" & gap <= 1e-9), ]
 }
 
+#' The main direction of a path's segments, in degrees in [0, 180) clockwise
+#' from the x axis (SVG's y points down); NA when no segment has a length
+#'
+#' Each segment is taken from its start to its end, weighted by its length.
+#' A direction and its reverse are one line, so the mean is taken over
+#' doubled angles: strokes at 179 and 1 degrees average to 0, not 90.
+#' @noRd
+stroke_direction <- function(path) {
+  if (is.null(path) || nrow(path) == 0L) return(NA_real_)
+  seg <- path_segments(path)
+  dx <- seg$x - seg$x0
+  dy <- seg$y - seg$y0
+  len <- sqrt(dx^2 + dy^2)
+  if (!any(len > 1e-9)) return(NA_real_)
+  a <- 2 * atan2(dy, dx)
+  mean_a <- atan2(sum(len * sin(a)), sum(len * cos(a)))
+  (mean_a / 2 * 180 / pi) %% 180
+}
+
 # One closed subpath: the only kind of path a preset can stand for.
 single_closed <- function(path) {
   nrow(path) > 0L && sum(path$cmd == "M") == 1L && path_closed(path)

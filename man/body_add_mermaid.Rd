@@ -67,8 +67,10 @@ inches, the diagram may fill. \code{NULL} (default): the content area of the
 page the orientation and margins give.}
 
 \item{...}{Other arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}: \code{font_scale},
-\code{word_font_family}, \code{align}, \code{min_stroke_pt}, \code{alt_text}. The drawing
-is placed in line with the text, in its own paragraph.}
+\code{word_font_family}, \code{align}, \code{min_stroke_pt}, \code{alt_text}, \code{links},
+\code{embed_images}. The drawing is placed in line with the text, in its own
+paragraph. Its pictures and click links are added to the document, so
+the saved file is complete.}
 }
 \value{
 The modified \code{rdocx} object (invisibly).

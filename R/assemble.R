@@ -76,15 +76,8 @@ to_items <- function(p) {
 empty_items <- function() to_items(piece_ptype())
 
 group_item <- function(name, box) {
-  quick_tibble(
-    name = name, kind = "group", parent = NA_character_,
-    x = box[[1]], y = box[[2]], w = box[[3]], h = box[[4]], rot = 0,
-    prst = NA_character_, fill = NA_character_, stroke = NA_character_,
-    fill_a = 0, stroke_a = 0, stroke_w = 0, head = "none", tail = "none",
-    label = "", flip_h = FALSE, flip_v = FALSE, adj = list(numeric()),
-    path = list(NULL), closed = NA, dash = list(NULL), text = list(NULL),
-    head_len = "med", head_w = "med", tail_len = "med", tail_w = "med", depth = 0L
-  )
+  new_item(name = name, kind = "group", x = box[[1]], y = box[[2]], w = box[[3]],
+           h = box[[4]], depth = 0L)
 }
 
 #' Items under a new group `name`, whose box holds their drawn rows
@@ -152,8 +145,6 @@ piece_entries <- function(items, p, markers) {
   entries
 }
 
-# Pieces of one unit as its items, strokes grouped with their marker shapes.
-unit_items <- function(p, markers) stack_items(piece_entries(to_items(p), p, markers))
 
 # ---- scope groups ---------------------------------------------------------------
 #
@@ -290,26 +281,65 @@ name_unit <- function(items, name) {
   group_under(items, name)
 }
 
-# Each folded piece as a block of its own.
-loose_blocks <- function(folded, markers, member_of = NA_character_) {
-  if (nrow(folded) == 0L) return(new_blocks(character(), numeric(), list()))
-  new_blocks("loose", folded$pos, piece_entries(to_items(folded), folded, markers),
+# Loose pieces (folded) as blocks: each piece a block of its own, except
+# icons and pictures, which are grouped by the scope rule.
+loose_blocks <- function(folded, markers, all_box, member_of = NA_character_) {
+  apart <- drawn_apart(folded)
+  own <- folded[!apart, ]
+  beside <- scope_blocks(folded[apart, ], markers, all_box)
+  new_blocks("loose", c(own$pos, beside$pos),
+             c(piece_entries(to_items(own), own, markers), beside$items),
              member_of = member_of)
 }
+
+#' A unit's folded pieces as its items in paint order: each piece an entry
+#' (with its marker shapes), icons and pictures grouped by the scope rule as
+#' loose items are
+#' @param lead Items standing for the unit's other pieces (a registered
+#'   shape), placed at `lead_pos`; NULL to take every piece of `p`.
+#' @noRd
+unit_items <- function(p, markers, all_box, lead = NULL, lead_pos = NA_real_) {
+  apart <- drawn_apart(p)
+  own <- p[!apart, ]
+  entries <- if (is.null(lead)) piece_entries(to_items(own), own, markers) else list(lead)
+  pos <- if (is.null(lead)) own$pos else lead_pos
+  beside <- scope_blocks(p[apart, ], markers, all_box)
+  blocks <- c(entries, beside$items)
+  stack_items(blocks[order(c(pos, beside$pos))])
+}
+
+# Units whose icons are named after them; an icon anywhere else is
+# mermaid:icon:icon.
+.icon_owner_kinds <- c("node", "subgraph")
+
+#' Icons (inline shapes) named mermaid:icon:<tag>
+#' @noRd
+name_icons <- function(p, tag) {
+  p$name[p$inline] <- mermaid_name("icon", tag)
+  p
+}
+
+icon_tag <- function(u) if (u$kind %in% .icon_owner_kinds) u$id else "icon"
+
+# The pieces that draw a unit's outline: not its text, its HTML label
+# boxes, its icons or its pictures.
+outline_pieces <- function(pu) pu$kind %in% c("shape", "line") & !pu$html & !pu$inline
 
 # A registered shape that the unit draws: the node becomes that one shape.
 registered_for <- function(u, pu) {
   reg <- registry_row(u$shape)
-  drawn <- any(pu$kind %in% c("shape", "line") & !pu$html)
-  if (!is.null(reg) && drawn) reg
+  if (!is.null(reg) && any(outline_pieces(pu))) reg
 }
 
-unit_blocks_node <- function(u, pu, markers) {
+unit_blocks_node <- function(u, pu, markers, all_box) {
+  pu <- name_icons(pu, icon_tag(u))
   reg <- registered_for(u, pu)
   items <- if (!is.null(reg)) {
-    registered_item(pu, reg, u$hand_drawn, u$name)
+    shape <- registered_item(pu, reg, u$hand_drawn, u$name)
+    lead_pos <- min(pu$pos[!drawn_apart(pu)])
+    name_unit(unit_items(pu, markers, all_box, lead = shape, lead_pos = lead_pos), u$name)
   } else {
-    name_unit(unit_items(fold_pieces(pu), markers), u$name)
+    name_unit(unit_items(fold_pieces(pu), markers, all_box), u$name)
   }
   new_blocks("node", u$pos, list(items), parent = u$parent)
 }
@@ -317,18 +347,19 @@ unit_blocks_node <- function(u, pu, markers) {
 # A subgraph block holds only its background, so that its other parts (a
 # title with no rect behind it, a state's inner box) take their paint order
 # among the subgraph's members.
-unit_blocks_subgraph <- function(u, pu, markers) {
+unit_blocks_subgraph <- function(u, pu, markers, all_box) {
+  pu <- name_icons(pu, icon_tag(u))
   reg <- registered_for(u, pu)
   bg_name <- mermaid_name("subgraph_bg", u$id)
   if (!is.null(reg)) {
     bg <- registered_item(pu, reg, u$hand_drawn, bg_name)
-    rest <- loose_blocks(pu[0, ], markers)
+    rest <- loose_blocks(pu[drawn_apart(pu), ], markers, all_box, member_of = u$id)
   } else {
     folded <- fold_pieces(pu)
-    first_shape <- match("shape", folded$kind)
+    first_shape <- match(TRUE, folded$kind == "shape" & !drawn_apart(folded))
     bg <- if (is.na(first_shape)) empty_items() else name_unit(to_items(folded[first_shape, ]), bg_name)
     rest <- loose_blocks(if (is.na(first_shape)) folded else folded[-first_shape, ], markers,
-                         member_of = u$id)
+                         all_box, member_of = u$id)
   }
   purrr::list_rbind(list(
     new_blocks("subgraph", u$pos, list(bg), gid = u$id, parent = u$parent),
@@ -337,18 +368,21 @@ unit_blocks_subgraph <- function(u, pu, markers) {
 }
 
 # Edges are never filled and keep their exact path, even a rectangular one.
-unit_blocks_edge <- function(u, pu, markers) {
+unit_blocks_edge <- function(u, pu, markers, all_box) {
   pu$fill <- NA_character_
   pu$fill_a <- 0
+  pu$fill_grad <- list(NULL)
   pu$prst[pu$kind != "line"] <- NA_character_
   pu$closed <- purrr::map_lgl(pu$path, function(p) !is.null(p) && path_closed(p))
   pu$name <- u$name
-  new_blocks("edge", u$pos, list(unit_items(pu, markers)), start = u$start, end = u$end)
+  pu <- name_icons(pu, icon_tag(u))
+  new_blocks("edge", u$pos, list(unit_items(pu, markers, all_box)), start = u$start, end = u$end)
 }
 
-unit_blocks_edge_label <- function(u, pu, markers) {
-  new_blocks("edge_label", u$pos, list(name_unit(unit_items(fold_pieces(pu), markers), u$name)),
-             start = u$start, end = u$end)
+unit_blocks_edge_label <- function(u, pu, markers, all_box) {
+  pu <- name_icons(pu, icon_tag(u))
+  items <- name_unit(unit_items(fold_pieces(pu), markers, all_box), u$name)
+  new_blocks("edge_label", u$pos, list(items), start = u$start, end = u$end)
 }
 
 .unit_builders <- list(
@@ -450,11 +484,12 @@ scene_items <- function(pieces, markers, db) {
   by_unit <- vctrs::vec_chop(pieces, indices = unname(unit_rows))
   all_box <- union_box(c(pieces$x, markers$x), c(pieces$y, markers$y),
                        c(pieces$w, markers$w), c(pieces$h, markers$h))
-  loose <- scope_blocks(fold_pieces(pieces[!in_unit, ]), markers, all_box)
+  loose_pieces <- name_icons(pieces[!in_unit, ], "icon")
+  loose <- scope_blocks(fold_pieces(loose_pieces), markers, all_box)
   blocks <- purrr::list_rbind(c(
     list(new_blocks(character(), numeric(), list())),
     purrr::map2(vctrs::vec_chop(units), by_unit, function(u, p) {
-      .unit_builders[[u$kind]](u, p, markers)
+      .unit_builders[[u$kind]](u, p, markers, all_box)
     }),
     list(new_blocks("loose", loose$pos, loose$items))
   ))

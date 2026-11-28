@@ -48,8 +48,18 @@
 #                   several "rect" shapes of the box's name and paint,
 #                   stacked top to bottom with no gap (compartments), each
 #                   with its own text; the dividing lines are not items.
-#   kind       chr  "group" | "shape" | "line" | "text". A path whose box has
-#                   no width or no height is a "line" (never filled).
+#                   An icon (a shape drawn inside a nested <svg>: an icon in
+#                   a label, an icon node's glyph, an architecture service's
+#                   icon) is mermaid:icon:<node or subgraph id>, else
+#                   mermaid:icon:icon. It is never part of a unit's outline
+#                   or paint and never joins another piece; its paths are
+#                   grouped by the scope rule like loose items, inside the
+#                   unit's group. A picture is mermaid:image:<id | first
+#                   class>, placed like any drawn item.
+#   kind       chr  "group" | "shape" | "line" | "text" | "image". A path
+#                   whose box has no width or no height is a "line" (never
+#                   filled). An "image" is a picture the browser could read
+#                   (`png`); it has no paint or text.
 #   parent     chr  `name` of the enclosing group row, NA at the top level
 #   x, y, w, h dbl  box. With rot != 0 it is the unrotated box, centred where
 #                   the item is drawn. Group rows: the union of the boxes of
@@ -60,6 +70,20 @@
 #                   or NA for custom geometry, free text and groups
 #   fill, stroke         chr  colour or NA
 #   fill_a, stroke_a     dbl  alpha 0-1 (0 when the paint is NA)
+#   fill_grad, stroke_grad
+#              list NULL for flat paint; else the gradient that paints the
+#                   fill / stroke (whose colour is then its first stop's):
+#                   list(type "linear" | "radial", p1, p2 (linear) or c, r
+#                   (radial) as root px, stops: tibble of o (0-1), color,
+#                   alpha). It is kept in root space; the emitter expresses
+#                   it in the item's own box, rotation and flips.
+#   fill_pattern
+#              chr  a DrawingML preset pattern (ltUpDiag, ltDnDiag, ltHorz,
+#                   ltVert) drawn in the fill colour over nothing, or NA for a
+#                   plain fill: Mermaid's hand-drawn hatching
+#   href       chr  the web or mail link of the item's nearest <a> ancestor,
+#                   NA for none
+#   png        list the picture's PNG bytes (raw) for an "image", else NULL
 #   stroke_w   dbl  stroke width, px (0 when there is no stroke)
 #   head, tail chr  line end at the path START / END: "none", "triangle",
 #                   "arrow", "stealth", "diamond", "oval". The path end is
@@ -102,7 +126,8 @@
 #                   rows      list of tibbles, one per paragraph (Mermaid's own
 #                             text rows), one row per run, columns t (chr),
 #                             bold, italic, underline (lgl), color (chr
-#                             "RRGGBB"), size (dbl, px), font (chr, the face
+#                             "RRGGBB"), alpha (dbl 0-1, the colour's and the
+#                             element's opacity), size (dbl, px), font (chr, the face
 #                             the browser used, may be ""), family (chr, the
 #                             CSS font-family list)
 #                   align     "left" | "center" | "right" (w:jc). Several
@@ -154,10 +179,13 @@ build_scene <- function(render) {
   )
 }
 
-# Tags of the prims that are reported but not drawn (images, <use>, ...).
+# Tags of the prims that are reported but not drawn (<use>, ...). A picture
+# is drawn when the browser could read it; one it could not, SVG <image> or
+# HTML <img>, is reported as "image".
 scene_unsupported <- function(prims) {
-  skipped <- purrr::keep(prims, function(p) p$kind %in% c("image", "other"))
-  unique(purrr::map_chr(skipped, function(p) p$tag %||% p$kind))
+  unread_image <- function(p) identical(p$kind, "image") && is.null(png_data(p$png))
+  skipped <- purrr::keep(prims, function(p) identical(p$kind, "other") || unread_image(p))
+  unique(purrr::map_chr(skipped, function(p) if (p$kind == "image") "image" else p$tag %||% p$kind))
 }
 
 # ---- tolerances ----------------------------------------------------------------
@@ -237,31 +265,55 @@ scene_unsupported <- function(prims) {
 #                that have one); scope groups nest along it.
 #   unit   list  the prim's own unit from the bridge (an edge path), NULL
 #                for most; the units of its ancestors are in `anc`.
+#   inline lgl   TRUE for a shape drawn inside a nested <svg> (an icon).
+# Icons and pictures are drawn apart (drawn_apart()): no folding rule looks
+# at them.
 # The shapes of markers Word has no line end for are not pieces: they are a
 # side table beside them (R/markers.R), so that no rule below can fold them
 # into other shapes, and they join their stroke when items are assembled.
 
-item_cols <- c("name", "kind", "parent", "x", "y", "w", "h", "rot", "prst",
-               "fill", "stroke", "fill_a", "stroke_a", "stroke_w", "head",
-               "tail", "label", "flip_h", "flip_v", "adj", "path", "closed",
-               "dash", "text", "head_len", "head_w", "tail_len", "tail_w")
+# Every item column with the value an item has when nothing sets it: the one
+# definition that pieces, group rows and registered shapes are all made from.
+# List columns hold their value wrapped in a list.
+.item_defaults <- list(
+  name = NA_character_, kind = NA_character_, parent = NA_character_,
+  x = NA_real_, y = NA_real_, w = NA_real_, h = NA_real_, rot = 0,
+  prst = NA_character_, fill = NA_character_, stroke = NA_character_,
+  fill_a = 0, stroke_a = 0, stroke_w = 0, head = "none", tail = "none",
+  label = "", flip_h = FALSE, flip_v = FALSE, adj = list(numeric()),
+  path = list(NULL), closed = NA, dash = list(NULL), text = list(NULL),
+  head_len = "med", head_w = "med", tail_len = "med", tail_w = "med",
+  fill_grad = list(NULL), stroke_grad = list(NULL), fill_pattern = NA_character_,
+  href = NA_character_, png = list(NULL)
+)
+
+item_cols <- names(.item_defaults)
+
+# The columns a piece has besides the item columns (see "prims -> pieces").
+.piece_only_defaults <- list(
+  i = NA_integer_, pos = NA_real_, src = NA_character_, html = FALSE,
+  corner_r = NA_real_, id = "", cls = "", anc = list(list()), data = list(list()),
+  marker_start = NA_character_, marker_end = NA_character_, scope = NA_integer_,
+  chain = list(integer()), unit = list(NULL), inline = FALSE
+)
+
+.piece_defaults <- c(.item_defaults, .piece_only_defaults)
+
+#' One row of `defaults` with the columns in `...` set (length 1 each, list
+#' columns wrapped)
+#' @noRd
+row_from_defaults <- function(defaults, ...) {
+  given <- list(...)
+  defaults[names(given)] <- given
+  tibble::new_tibble(defaults, nrow = 1L)
+}
+
+#' One items row: the defaults of `.item_defaults` with the columns given
+#' @noRd
+new_item <- function(...) row_from_defaults(.item_defaults, ...)
 
 # Built once: the prototype of every rbind of pieces and of empty items.
-.piece_proto <- tibble::tibble(
-  i = integer(), pos = numeric(), src = character(), name = character(),
-  kind = character(),
-  parent = character(), x = numeric(), y = numeric(), w = numeric(),
-  h = numeric(), rot = numeric(), prst = character(), fill = character(),
-  stroke = character(), fill_a = numeric(), stroke_a = numeric(),
-  stroke_w = numeric(), head = character(), tail = character(),
-  label = character(), flip_h = logical(), flip_v = logical(), adj = list(),
-  path = list(), closed = logical(), dash = list(), text = list(),
-  html = logical(), corner_r = numeric(), id = character(), cls = character(),
-  anc = list(), data = list(), marker_start = character(),
-  marker_end = character(), scope = integer(), chain = list(), unit = list(),
-  head_len = character(), head_w = character(), tail_len = character(),
-  tail_w = character()
-)
+.piece_proto <- vctrs::vec_ptype(tibble::new_tibble(.piece_defaults, nrow = 1L))
 
 piece_ptype <- function() .piece_proto
 
@@ -297,26 +349,45 @@ box_in_view <- function(b, vb) {
 new_piece <- function(p, kind, box, rot = 0, prst = NA_character_,
                       paint = no_paint(), path = NULL, closed = NA,
                       corner_r = NA_real_, flip_h = FALSE, flip_v = FALSE,
-                      adj = numeric(), text = NULL, label = "") {
-  # new_tibble() skips tibble()'s per-call checks: one piece is made per prim,
-  # and those checks were most of the time build_scene() took.
-  tibble::new_tibble(list(
+                      adj = numeric(), text = NULL, label = "", png = NULL) {
+  # One piece is made per prim, so this builds the row directly: tibble()'s
+  # per-call checks were most of the time build_scene() took.
+  row_from_defaults(
+    .piece_defaults,
     i = as.integer(p$i %||% NA_integer_), pos = as.numeric(p$i %||% NA_real_),
-    src = as.character(p$kind), name = NA_character_, kind = kind,
-    parent = NA_character_,
+    src = as.character(p$kind), kind = kind,
     x = box[[1]], y = box[[2]], w = box[[3]], h = box[[4]], rot = rot,
     prst = prst, fill = paint$fill, stroke = paint$stroke,
     fill_a = paint$fill_a, stroke_a = paint$stroke_a, stroke_w = paint$stroke_w,
+    fill_grad = list(paint$fill_grad), stroke_grad = list(paint$stroke_grad),
     head = paint$head, tail = paint$tail, label = label,
     flip_h = flip_h, flip_v = flip_v, adj = list(adj), path = list(path),
     closed = closed, dash = list(paint$dash), text = list(text),
+    href = anc_href(p$anc), png = list(png),
     html = isTRUE(p$html), corner_r = corner_r,
     id = as.character(p$id %||% ""), cls = as.character(p$cls %||% ""),
     anc = list(p$anc %||% list()), data = list(p$data %||% list()),
     marker_start = marker_id(p$marker_start), marker_end = marker_id(p$marker_end),
     scope = anc_scope(p$anc), chain = list(anc_serials(p$anc)), unit = list(p$unit),
-    head_len = "med", head_w = "med", tail_len = "med", tail_w = "med"
-  ), nrow = 1L)
+    inline = isTRUE(p$inline)
+  )
+}
+
+# Link targets Word may open from a click: web and mail links only (a
+# `javascript:` link, a page of the diagram's own site, a data URI are not).
+.link_schemes <- "^(https?|mailto):"
+
+#' The href of a prim's nearest `<a>` ancestor, NA when there is none or its
+#' target is not a web or mail link
+#' @noRd
+anc_href <- function(anc) {
+  # Base iteration: this runs for every prim.
+  hrefs <- vapply(anc %||% list(), function(a) {
+    h <- a$href
+    if (is.null(h) || length(h) == 0L || is.na(h[[1]])) NA_character_ else as.character(h[[1]])
+  }, character(1))
+  near <- utils::tail(hrefs[!is.na(hrefs)], 1L)
+  if (length(near) == 1L && grepl(.link_schemes, near, ignore.case = TRUE)) near else NA_character_
 }
 
 marker_id <- function(x) {
@@ -352,8 +423,9 @@ prim_matrix <- function(p) {
 }
 
 no_paint <- function() {
-  list(fill = NA_character_, fill_a = 0, stroke = NA_character_, stroke_a = 0,
-       stroke_w = 0, dash = NULL, head = "none", tail = "none")
+  list(fill = NA_character_, fill_a = 0, fill_grad = NULL, stroke = NA_character_,
+       stroke_a = 0, stroke_grad = NULL, stroke_w = 0, dash = NULL, head = "none",
+       tail = "none")
 }
 
 prim_paint <- function(p) {
@@ -363,13 +435,52 @@ prim_paint <- function(p) {
   list(
     fill = fill,
     fill_a = if (is.na(fill)) 0 else prim_number(p$fill_a, 1),
+    fill_grad = if (!is.na(fill)) prim_gradient(p$fill_grad),
     stroke = stroke,
     stroke_a = if (stroked) prim_number(p$stroke_a, 1) else 0,
+    stroke_grad = if (stroked) prim_gradient(p$stroke_grad),
     stroke_w = if (stroked) prim_number(p$stroke_w, 1) else 0,
     dash = if (stroked && length(p$dash) > 0L) as.numeric(unlist(p$dash)) else NULL,
     head = line_end_kind(p$marker_start),
     tail = line_end_kind(p$marker_end)
   )
+}
+
+#' The bridge's gradient as the scene keeps it, or NULL for none
+#'
+#' list(type "linear" | "radial", p1, p2 (linear) or c, r (radial) in root
+#' px, stops: a tibble of o (0-1), color ("RRGGBB") and alpha). It stays in
+#' root space: the emitter expresses it in the item's own box, which folding
+#' may still change.
+#' @noRd
+prim_gradient <- function(g) {
+  if (is.null(g) || !isTRUE(g$type %in% c("linear", "radial")) || length(g$stops) == 0L) {
+    return(NULL)
+  }
+  point <- function(v) as.numeric(unlist(v))
+  stops <- tibble::new_tibble(list(
+    o = vapply(g$stops, function(s) prim_number(s$o), numeric(1)),
+    color = vapply(g$stops, function(s) bridge_colour(s$c), character(1)),
+    alpha = vapply(g$stops, function(s) prim_number(s$a, 1), numeric(1))
+  ), nrow = length(g$stops))
+  list(type = g$type, p1 = point(g$p1), p2 = point(g$p2), c = point(g$c),
+       r = prim_number(g$r, NA_real_), stops = stops)
+}
+
+#' A gradient carried through matrix `m` (a marker's content to root space)
+#' @noRd
+gradient_through <- function(g, m) {
+  if (is.null(g)) return(NULL)
+  move <- function(pt) {
+    if (length(pt) != 2L) return(pt)
+    q <- mat_apply(m, pt[[1]], pt[[2]])
+    c(q$x, q$y)
+  }
+  g$p1 <- move(g$p1)
+  g$p2 <- move(g$p2)
+  g$c <- move(g$c)
+  g$r <- g$r * mat_scale(m)
+  g
 }
 
 # The root-space box of a local rectangle: upright matrices (translate, scale,
@@ -435,6 +546,7 @@ line_piece <- function(p, x, y, paint) {
   # SVG never fills a line.
   paint$fill <- NA_character_
   paint$fill_a <- 0
+  paint["fill_grad"] <- list(NULL)
   new_piece(p, "line", c(min(x), min(y), abs(diff(x)), abs(diff(y))),
             prst = "line", paint = paint, closed = FALSE,
             flip_h = x[[2]] < x[[1]], flip_v = y[[2]] < y[[1]])
@@ -567,6 +679,7 @@ text_runs <- function(runs) {
     italic = purrr::map_lgl(field("italic", FALSE), isTRUE),
     underline = purrr::map_lgl(field("underline", FALSE), isTRUE),
     color = purrr::map_chr(field("color", NULL), bridge_colour),
+    alpha = as.numeric(unlist(field("alpha", 1))),
     size = as.numeric(unlist(field("size", NA_real_))),
     font = as.character(unlist(field("font", ""))),
     family = as.character(unlist(field("family", "")))
@@ -585,12 +698,32 @@ piece_text <- function(p) {
   new_piece(p, "text", box, rot = prim_number(p$rot), text = text, label = label)
 }
 
-# Prim kind -> piece; kinds not listed (images, <use>, ...) are not drawn.
+#' The bytes of a `data:image/png;base64,...` URI, NULL for anything else
+#' @noRd
+png_data <- function(uri) {
+  prefix <- "^data:image/png;base64,"
+  if (!is.character(uri) || length(uri) != 1L || !grepl(prefix, uri)) return(NULL)
+  jsonlite::base64_dec(sub(prefix, "", uri))
+}
+
+# A picture is placed like a rect: its own box through its matrix. Without
+# the picture's bytes (the browser could not read it) there is nothing to
+# draw, and scene_unsupported() reports it.
+piece_image <- function(p) {
+  bytes <- png_data(p$png)
+  if (is.null(bytes)) return(NULL)
+  g <- p$geom
+  fb <- frame_box(prim_number(g$x), prim_number(g$y), prim_number(g$w),
+                  prim_number(g$h), prim_matrix(p))
+  new_piece(p, "image", fb$box, fb$rot, closed = TRUE, png = bytes)
+}
+
+# Prim kind -> piece; kinds not listed (<use>, ...) are not drawn.
 .piece_converters <- list(
   rect = piece_rect, ellipse = piece_ellipse, line = piece_line,
   poly = function(p) piece_outline(p, poly_path(p$geom$points, isTRUE(p$geom$closed))),
   path = function(p) piece_outline(p, path_parse(p$geom$d %||% "")),
-  text = piece_text
+  text = piece_text, image = piece_image
 )
 
 #' One prim as a piece, or NULL for a kind that is not drawn
@@ -606,13 +739,23 @@ prim_piece <- function(p) {
 #' any unit, in paint order
 #' @noRd
 fold_pieces <- function(p) {
-  p |>
+  apart <- drawn_apart(p)
+  folded <- p[!apart, ] |>
     collapse_html_boxes() |>
     frame_rects() |>
     pair_by_box() |>
     split_compartments() |>
     merge_texts()
+  if (!any(apart)) return(folded)
+  out <- purrr::list_rbind(list(folded, p[apart, ]))
+  out[order(out$pos), ]
 }
+
+#' Pieces that no folding rule may touch: icons (shapes inside a nested
+#' <svg>, which belong to a label or an icon, not to any outline) and
+#' pictures. They are drawn as they are, beside the shapes they sit on.
+#' @noRd
+drawn_apart <- function(p) p$inline | p$kind == "image"
 
 box_matrix <- function(p) cbind(p$x, p$y, p$w, p$h)
 
@@ -792,12 +935,22 @@ fold_box <- function(pieces) {
   f <- if (length(filled) > 0L) filled[[1]] else NA_integer_
   out$fill <- pieces$fill[f]
   out$fill_a <- if (is.na(f)) 0 else pieces$fill_a[[f]]
+  # A gradient is part of the paint it belongs to.
+  out$fill_grad <- list(if (is.na(f)) NULL else pieces$fill_grad[[f]])
   k <- if (length(stroked) > 0L) max(stroked) else NA_integer_
   out$stroke <- pieces$stroke[k]
   out$stroke_a <- if (is.na(k)) 0 else pieces$stroke_a[[k]]
   out$stroke_w <- if (is.na(k)) 0 else pieces$stroke_w[[k]]
+  out$stroke_grad <- list(if (is.na(k)) NULL else pieces$stroke_grad[[k]])
   out$dash <- list(if (is.na(k)) NULL else pieces$dash[[k]])
+  out$href <- first_present(pieces$href)
   out
+}
+
+# The first value that is not NA, else NA.
+first_present <- function(x) {
+  x <- x[!is.na(x)]
+  if (length(x) == 0L) NA_character_ else x[[1]]
 }
 
 # A folded custom piece with its path closed, as the preset that closed path
@@ -1059,6 +1212,8 @@ merge_texts <- function(p) {
     place_text(combine_texts(p$text[ts]), b[s, ], rel)
   })
   p$label[into] <- purrr::map_chr(merged, function(ts) paste(p$label[ts], collapse = "\n"))
+  # A linked text keeps its link in the shape that takes it.
+  p$href[into] <- purrr::map2_chr(into, merged, function(s, ts) first_present(p$href[c(s, ts)]))
   p[setdiff(seq_len(nrow(p)), unlist(merged)), ]
 }
 

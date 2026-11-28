@@ -53,7 +53,8 @@
 #'   inches, the diagram may fill. `NULL` (default): the content area of the
 #'   page the orientation and margins give.
 #' @param ... Other arguments passed to [build_diagram_xml()]: `font_scale`,
-#'   `word_font_family`, `align`, `min_stroke_pt`, `alt_text`.
+#'   `word_font_family`, `align`, `min_stroke_pt`, `alt_text`, `links`,
+#'   `embed_images`.
 #' @return A `mermaid_word_diagram` object with fields:
 #'   - `xml`: DrawingML XML string ready for [officer::body_add_xml()]
 #'   - `scene`: what was drawn, one row per Word shape or group
@@ -64,6 +65,12 @@
 #'   - `orientation`: resolved orientation (`"portrait"` or `"landscape"`)
 #'   - `margins`: normalised margin list, or `NULL` if `page_margins_in` was
 #'     not supplied
+#'   - `links`, `images`: the hyperlinks and pictures the XML refers to by
+#'     placeholder ids (see [build_diagram_xml()]). When either has rows the
+#'     XML alone is not complete: [body_add_mermaid()] adds them to the
+#'     document; to insert the XML yourself, do what the Details of
+#'     [build_diagram_xml()] describe, or use `links = "field"` and
+#'     `embed_images = FALSE`.
 #'
 #'   For a list of sources, a list of these, in order; a diagram that could
 #'   not be rendered holds its error condition instead (see
@@ -121,7 +128,8 @@ word_diagram <- function(render, start_id, layout, extra_args) {
   structure(
     list(xml = result$xml, scene = scene, type = scene$type,
          start_id = start_id, next_id = result$next_id,
-         orientation = orientation, margins = layout$margins),
+         orientation = orientation, margins = layout$margins,
+         links = result$links, images = result$images),
     class = "mermaid_word_diagram"
   )
 }
@@ -163,8 +171,10 @@ word_diagram <- function(render, start_id, layout, extra_args) {
 #'   document body (1 for an empty document), so repeated calls on one document
 #'   never produce duplicate ids. An explicit value is used as given.
 #' @param ... Other arguments passed to [build_diagram_xml()]: `font_scale`,
-#'   `word_font_family`, `align`, `min_stroke_pt`, `alt_text`. The drawing
-#'   is placed in line with the text, in its own paragraph.
+#'   `word_font_family`, `align`, `min_stroke_pt`, `alt_text`, `links`,
+#'   `embed_images`. The drawing is placed in line with the text, in its own
+#'   paragraph. Its pictures and click links are added to the document, so
+#'   the saved file is complete.
 #' @return The modified `rdocx` object (invisibly).
 #' @examples
 #' \dontrun{
@@ -215,7 +225,7 @@ body_add_mermaid <- function(doc, mermaid_code, start_id = NULL,
     doc <- officer::body_end_section_continuous(doc)
   }
 
-  doc <- officer::body_add_xml(doc, diagram$xml)
+  doc <- officer::body_add_xml(doc, with_package_parts(doc, diagram))
 
   if (needs_section) {
     doc <- officer::body_end_block_section(
@@ -265,6 +275,83 @@ print.mermaid_word_diagram <- function(x, ...) {
   ids <- suppressWarnings(as.integer(ids))
   ids <- ids[!is.na(ids)]
   if (length(ids) == 0L) 1L else max(ids) + 1L
+}
+
+# ---- pictures and links in the document package ---------------------------------
+#
+# A drawing's XML refers to its pictures and click links by placeholder ids
+# (build_diagram_xml()). These functions give each its part or relationship
+# in the document, the way officer's own functions do: a picture's r:embed
+# becomes the path of a PNG file, which officer copies into word/media and
+# registers when the document is saved (as for body_add_img()); a link is
+# added to the body's relationships (officer::docx_body_relationship()),
+# because officer resolves only w:hyperlink links by itself, not a shape's
+# a:hlinkClick.
+
+.rel_type_hyperlink <- "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+
+#' A diagram's XML with every placeholder replaced by what `doc` knows it as
+#' @noRd
+with_package_parts <- function(doc, diagram) {
+  images <- diagram$images
+  links <- diagram$links
+  xml <- replace_placeholders(diagram$xml, images$rel_id, picture_files(images$bytes))
+  replace_placeholders(xml, links$rel_id, link_relationships(doc, links$url))
+}
+
+#' Every `"placeholder"` attribute value in `xml` replaced by its value in
+#' `to`; the quotes make a placeholder never match the start of a longer one
+#' @noRd
+replace_placeholders <- function(xml, from, to) {
+  purrr::reduce2(from, to, function(acc, f, t) {
+    gsub(paste0("\"", f, "\""), paste0("\"", attr_escape(t), "\""), acc, fixed = TRUE)
+  }, .init = xml)
+}
+
+#' Each picture as a PNG file, its path
+#'
+#' The files stay until the R session ends: officer reads them when the
+#' document is saved, which may be long after this call.
+#' @noRd
+picture_files <- function(bytes) {
+  purrr::map_chr(bytes, function(b) {
+    path <- tempfile("mermaid2drawml-", fileext = ".png")
+    writeBin(b, path)
+    path
+  })
+}
+
+#' The relationship id of an external hyperlink to each URL in the body of
+#' `doc`, added to it where it has none
+#'
+#' Relies on the relationship object officer::docx_body_relationship()
+#' returns having `get_data()`, `get_next_id()` and `add()` (officer 0.6 to
+#' 0.7); it changes `doc` in place, as officer's own body_add_*() do.
+#' @noRd
+link_relationships <- function(doc, urls) {
+  if (length(urls) == 0L) return(character())
+  rel <- officer::docx_body_relationship(doc)
+  if (!all(c("get_data", "get_next_id", "add") %in% names(rel))) {
+    cli::cli_abort(
+      c("Cannot add hyperlinks to this document: officer's relationship object has changed.",
+        i = "Use {.code links = \"field\"}, which needs no relationship."),
+      class = "mermaid2drawml_officer_api")
+  }
+  purrr::map_chr(urls, function(url) hyperlink_rel_id(rel, url))
+}
+
+hyperlink_rel_id <- function(rel, url) {
+  known <- rel$get_data()
+  hit <- known$id[known$target %in% url & known$type %in% .rel_type_hyperlink]
+  if (length(hit) > 0L) return(hit[[1]])
+  if (url %in% known$target) {
+    # officer adds no second relationship to a target it already has.
+    cli::cli_abort("The document already has a relationship to {.url {url}} that is not a hyperlink.",
+                   class = "mermaid2drawml_officer_api")
+  }
+  id <- sprintf("rId%.0f", rel$get_next_id())
+  rel$add(id = id, type = .rel_type_hyperlink, target = url, target_mode = "External")
+  id
 }
 
 #' Does the document body hold anything besides its final section properties?

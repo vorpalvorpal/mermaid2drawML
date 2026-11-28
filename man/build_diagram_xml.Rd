@@ -15,6 +15,8 @@ build_diagram_xml(
   max_scale = 1,
   min_stroke_pt = 0.75,
   alt_text = NULL,
+  links = c("shape", "field", "none"),
+  embed_images = TRUE,
   ...
 )
 }
@@ -48,14 +50,29 @@ small diagram; \code{Inf} fills the page.}
 \item{alt_text}{Character. Alternative text for the drawing. Default
 \code{NULL}: the diagram's \code{accDescr}, else its \code{accTitle}, else none.}
 
+\item{links}{How Mermaid's links (\verb{click X href}; web and mail addresses
+only) are written: \code{"shape"} (default) makes each linked shape a click
+target, which needs a relationship in the document (see Details);
+\code{"field"} wraps the linked text in a Word \code{HYPERLINK} field, which needs
+nothing else but links only shapes that hold text; \code{"none"} leaves links
+out.}
+
+\item{embed_images}{Logical. Draw the pictures the diagram holds (default
+\code{TRUE}), which need parts in the document (see Details); \code{FALSE} leaves
+them out with a \code{mermaid2drawml_unsupported} warning.}
+
 \item{...}{The arguments of earlier versions \code{ast}, \code{margin_in},
 \code{default_fill}, \code{default_stroke}, \code{default_text_color} and
 \code{stroke_width_pt} are ignored with a warning (colours and line widths now
 come from the diagram itself). Anything else is an error.}
 }
 \value{
-A list: \code{xml}, the \verb{<w:p>} for \code{\link[officer:body_add_xml]{officer::body_add_xml()}}, and
-\code{next_id}, the first id the drawing did not use.
+A list: \code{xml}, the \verb{<w:p>} for \code{\link[officer:body_add_xml]{officer::body_add_xml()}};
+\code{next_id}, the first id the drawing did not use; \code{links}, a tibble of
+\code{rel_id} (the placeholder in the XML) and \code{url}, one row per linked URL;
+\code{images}, a tibble of \code{rel_id} (the placeholder) and \code{bytes} (a list of
+PNG files as raw vectors), one row per distinct picture. Both have no
+rows when the XML needs nothing else.
 }
 \description{
 Turns a rendered diagram into one Word paragraph holding the diagram as an
@@ -66,6 +83,20 @@ in-line group of editable shapes. Most users call \code{\link[=mermaid_to_word]{
 The diagram keeps Mermaid's proportions and is shrunk to fit the page if
 it is larger; text shrinks with it. Main text below 7 pt signals a
 \code{mermaid2drawml_small_text} warning, whose \code{points} field holds that size,
-and parts of the diagram that cannot be drawn as shapes (embedded images)
-a \code{mermaid2drawml_unsupported} one, whose \code{tags} field names them.
+and parts of the diagram that cannot be drawn as shapes (\verb{<use>}
+elements, pictures the browser could not read, pictures left out with
+\code{embed_images = FALSE}) a \code{mermaid2drawml_unsupported} one, whose \code{tags}
+field names them.
+
+Pictures and click links need parts of the Word document package that a
+paragraph's XML cannot carry. The XML refers to them by placeholder ids,
+listed in the result's \code{images} and \code{links}, and \code{\link[=body_add_mermaid]{body_add_mermaid()}}
+adds them to the document. When either has rows, the XML alone is not
+complete: before inserting it yourself with \code{\link[officer:body_add_xml]{officer::body_add_xml()}},
+replace each image \code{rel_id} in the XML by the path of a PNG file holding
+its \code{bytes} (officer then embeds the file when the document is saved), and
+add each link as an external hyperlink relationship of the document body
+(\code{officer::docx_body_relationship(doc)$add()}), replacing its \code{rel_id} by
+that relationship's id. Or use \code{links = "field"} and
+\code{embed_images = FALSE}, which give XML that needs nothing else.
 }

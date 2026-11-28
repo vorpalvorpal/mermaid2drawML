@@ -80,7 +80,37 @@
 * The drawing's alternative text comes from the diagram's `accTitle` /
   `accDescr`, or from the new `alt_text` argument.
 
+* Transparent text (a colour with alpha, or text under an element with
+  opacity, such as Gantt axis ticks) keeps its transparency in Word 2010
+  and later.
+
+* Gradient fills and lines (Sankey links, gradients from `classDef`) are
+  Word gradient fills, linear or radial, running the way the SVG ran them,
+  instead of their first colour.
+
+* Pictures are embedded: an image node, a C4 person, an `<img>` in a label.
+  `body_add_mermaid()` adds them to the document; `embed_images = FALSE`
+  leaves them out with the `mermaid2drawml_unsupported` warning, as does a
+  picture the browser could not load.
+
+* Icons (`fa:` icons in labels, icon nodes, architecture service icons) are
+  shapes of their own, `mermaid:icon:<node id>`, grouped inside their node;
+  they no longer change the node's outline or colours.
+
+* Links (`click X href`, web and mail addresses only) make the node's shapes
+  click targets in Word. `links = "field"` writes them as `HYPERLINK`
+  fields around the text instead, and `links = "none"` leaves them out.
+
+* The hand-drawn look's hatched fills are Word line patterns in the hatch's
+  colour and direction, instead of a flat fill.
+
 ## Interface
+
+* `build_diagram_xml()` returns `links` and `images` beside `xml` and
+  `next_id`, and `mermaid_to_word()` returns them too: the hyperlinks and
+  pictures the XML refers to by placeholder ids. When they have rows, XML
+  inserted with `officer::body_add_xml()` needs them added to the document
+  (see `?build_diagram_xml`); `body_add_mermaid()` does this itself.
 
 * `mermaid_to_word()` and `body_add_mermaid()` gain `mermaid_config`, a list
   of Mermaid configuration (for example `list(theme = "forest")`).

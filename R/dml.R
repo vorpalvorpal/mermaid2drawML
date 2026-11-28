@@ -19,7 +19,9 @@
   "xmlns:a"   = "http://schemas.openxmlformats.org/drawingml/2006/main",
   "xmlns:w"   = "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
   "xmlns:r"   = "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
-  "xmlns:mc"  = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+  "xmlns:mc"  = "http://schemas.openxmlformats.org/markup-compatibility/2006",
+  "xmlns:pic" = "http://schemas.openxmlformats.org/drawingml/2006/picture",
+  "xmlns:w14" = "http://schemas.microsoft.com/office/word/2010/wordml"
 )
 
 # ---- generic element ---------------------------------------------------------
@@ -147,32 +149,72 @@ dml_cust_geom <- function(path, w, h) {
 
 # ---- paint ---------------------------------------------------------------------
 
+#' a:srgbClr, with a:alpha below 1
+#' @noRd
+dml_srgb <- function(hex, alpha = 1) {
+  a <- if (!is.na(alpha) && alpha < 1) xml_tag("a:alpha", val = alpha * 100000)
+  xml_tag("a:srgbClr", val = hex, .children = a)
+}
+
 #' a:solidFill (with a:alpha below 1) or a:noFill
 #' @param hex "RRGGBB" or NA for none.
 #' @noRd
 dml_fill <- function(hex, alpha = 1) {
   if (is.na(hex)) return(xml_tag("a:noFill"))
-  a <- if (!is.na(alpha) && alpha < 1) xml_tag("a:alpha", val = alpha * 100000)
-  xml_tag("a:solidFill", .children = xml_tag("a:srgbClr", val = hex, .children = a))
+  xml_tag("a:solidFill", .children = dml_srgb(hex, alpha))
+}
+
+#' a:gradFill
+#'
+#' @param stops A data frame of pos (0-100000), color ("RRGGBB") and alpha.
+#' @param ang For a linear gradient, its angle in 60000ths of a degree
+#'   clockwise; NULL for a radial one.
+#' @param fill_to_rect For a radial gradient, its centre as insets c(l, t,
+#'   r, b) from the box's sides, in 1000ths of a percent.
+#' @noRd
+dml_grad_fill <- function(stops, ang = NULL, fill_to_rect = NULL) {
+  gs <- purrr::pmap_chr(list(stops$pos, stops$color, stops$alpha), function(pos, color, alpha) {
+    xml_tag("a:gs", pos = pos, .children = dml_srgb(color, alpha))
+  })
+  shade <- if (!is.null(ang)) {
+    xml_tag("a:lin", ang = ang, scaled = FALSE)
+  } else {
+    xml_tag("a:path", path = "circle", .children = xml_tag(
+      "a:fillToRect", l = fill_to_rect[[1]], t = fill_to_rect[[2]], r = fill_to_rect[[3]],
+      b = fill_to_rect[[4]]))
+  }
+  xml_tag("a:gradFill", rotWithShape = TRUE,
+          .children = c(xml_tag("a:gsLst", .children = gs), shade))
+}
+
+#' a:pattFill of preset `prst` in colour `hex`, with nothing behind it: the
+#' schema needs no a:bgClr, but Word reads one, so it is a white of alpha 0
+#' @noRd
+dml_patt_fill <- function(prst, hex, alpha = 1) {
+  xml_tag("a:pattFill", prst = prst, .children = c(
+    xml_tag("a:fgClr", .children = dml_srgb(hex, alpha)),
+    xml_tag("a:bgClr", .children = dml_srgb("FFFFFF", 0))
+  ))
 }
 
 #' a:ln: width in EMU, paint, preset dash, line ends
 #'
-#' @param hex NA draws no line.
+#' @param paint The line's fill element (dml_fill(), dml_grad_fill()), or
+#'   NULL for no line.
 #' @param dash A DrawingML preset dash name, or NA for solid.
 #' @param head,tail Line-end types; "none" writes no end.
 #' @param head_size,tail_size Each end's size classes c(w, len), "sm" |
 #'   "med" | "lg".
 #' @noRd
-dml_ln <- function(width, hex, alpha = 1, dash = NA, head = "none", tail = "none",
+dml_ln <- function(width, paint, dash = NA, head = "none", tail = "none",
                    head_size = c(w = "med", len = "med"),
                    tail_size = c(w = "med", len = "med")) {
-  if (is.na(hex)) return(xml_tag("a:ln", .children = xml_tag("a:noFill")))
+  if (is.null(paint)) return(xml_tag("a:ln", .children = xml_tag("a:noFill")))
   line_end <- function(tag, type, size) {
     if (!identical(type, "none")) xml_tag(tag, type = type, w = size[["w"]], len = size[["len"]])
   }
   xml_tag("a:ln", w = width, .children = c(
-    dml_fill(hex, alpha),
+    paint,
     if (!is.na(dash)) xml_tag("a:prstDash", val = dash),
     line_end("a:headEnd", head, head_size),
     line_end("a:tailEnd", tail, tail_size)
@@ -208,14 +250,43 @@ dml_body_pr <- function(insets = c(0, 0, 0, 0), valign = "center") {
 #' @param txbx A wps:txbx element, or NULL.
 #' @param body_pr A wps:bodyPr element (required by the schema, so a shape
 #'   without text gets an empty one).
+#' @param link The relationship id of the shape's hyperlink, or NULL.
 #' @noRd
-dml_wsp <- function(name, role, sp_pr, txbx = NULL, body_pr = xml_tag("wps:bodyPr")) {
+dml_wsp <- function(name, role, sp_pr, txbx = NULL, body_pr = xml_tag("wps:bodyPr"),
+                    link = NULL) {
   xml_tag("wps:wsp", .children = c(
-    xml_tag("wps:cNvPr", id = dml_id(), name = name),
+    xml_tag("wps:cNvPr", id = dml_id(), name = name, .children = dml_hlink(link)),
     .nv_props[[role]](),
     xml_tag("wps:spPr", .children = sp_pr),
     txbx,
     body_pr
+  ))
+}
+
+#' The a:hlinkClick of a shape or picture whose click follows relationship
+#' `link`; nothing for NULL
+#' @noRd
+dml_hlink <- function(link) if (!is.null(link)) xml_tag("a:hlinkClick", "r:id" = link)
+
+#' One pic:pic: a picture stretched over its box
+#'
+#' @param xfrm Its a:xfrm.
+#' @param embed The relationship id of its image part. r:embed is a:blip's
+#'   first attribute: officer looks for `<a:blip r:embed="` when it adds the
+#'   image parts of a document.
+#' @param link The relationship id of its hyperlink, or NULL.
+#' @noRd
+dml_pic <- function(name, xfrm, embed, link = NULL) {
+  xml_tag("pic:pic", .children = c(
+    xml_tag("pic:nvPicPr", .children = c(
+      xml_tag("pic:cNvPr", id = dml_id(), name = name, .children = dml_hlink(link)),
+      xml_tag("pic:cNvPicPr", .children = xml_tag("a:picLocks", noChangeAspect = TRUE))
+    )),
+    xml_tag("pic:blipFill", .children = c(
+      xml_tag("a:blip", "r:embed" = embed),
+      xml_tag("a:stretch", .children = xml_tag("a:fillRect"))
+    )),
+    xml_tag("pic:spPr", .children = c(xfrm, dml_prst_geom("rect")))
   ))
 }
 

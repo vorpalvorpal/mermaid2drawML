@@ -442,7 +442,7 @@ for (nm in all_fixture_names()) {
     expect_s3_class(sc, "mermaid_scene")
     expect_true(all(scene_cols %in% names(it)))
     expect_gt(nrow(it), 0L)
-    expect_true(all(it$kind %in% c("group", "shape", "line", "text")))
+    expect_true(all(it$kind %in% c("group", "shape", "line", "text", "image")))
 
     drawn <- it[it$kind != "group", ]
     for (col in c("x", "y", "w", "h")) {

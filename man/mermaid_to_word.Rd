@@ -67,7 +67,8 @@ inches, the diagram may fill. \code{NULL} (default): the content area of the
 page the orientation and margins give.}
 
 \item{...}{Other arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}: \code{font_scale},
-\code{word_font_family}, \code{align}, \code{min_stroke_pt}, \code{alt_text}.}
+\code{word_font_family}, \code{align}, \code{min_stroke_pt}, \code{alt_text}, \code{links},
+\code{embed_images}.}
 }
 \value{
 A \code{mermaid_word_diagram} object with fields:
@@ -81,6 +82,12 @@ chaining diagrams
 \item \code{orientation}: resolved orientation (\code{"portrait"} or \code{"landscape"})
 \item \code{margins}: normalised margin list, or \code{NULL} if \code{page_margins_in} was
 not supplied
+\item \code{links}, \code{images}: the hyperlinks and pictures the XML refers to by
+placeholder ids (see \code{\link[=build_diagram_xml]{build_diagram_xml()}}). When either has rows the
+XML alone is not complete: \code{\link[=body_add_mermaid]{body_add_mermaid()}} adds them to the
+document; to insert the XML yourself, do what the Details of
+\code{\link[=build_diagram_xml]{build_diagram_xml()}} describe, or use \code{links = "field"} and
+\code{embed_images = FALSE}.
 }
 
 For a list of sources, a list of these, in order; a diagram that could

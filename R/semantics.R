@@ -287,7 +287,8 @@ inset_adj <- function(pts, box) {
 #' one, and all of the unit's text
 #' @noRd
 registered_item <- function(pu, reg, hand_drawn, name) {
-  shapes <- pu[pu$kind %in% c("shape", "line") & !pu$html, ]
+  # An icon in the label is no part of the node's outline or paint.
+  shapes <- pu[pu$kind %in% c("shape", "line") & !pu$html & !pu$inline, ]
   box <- union_box(shapes$x, shapes$y, shapes$w, shapes$h)
 
   filled <- which(!is.na(shapes$fill))
@@ -297,6 +298,8 @@ registered_item <- function(pu, reg, hand_drawn, name) {
   stroked <- which(!is.na(shapes$stroke))
   stroke_from <- if (length(stroked) > 0L) max(stroked) else NA_integer_
   # The hand-drawn look paints the fill as hachure strokes, drawn first.
+  # Word has no hachure: the hatch's colour becomes the fill, drawn as the
+  # line pattern nearest the strokes' direction.
   hachure <- is.na(fill_from) && hand_drawn && nrow(shapes) > 0L
 
   # A registered rect drawn with rounded corners (a state) keeps them.
@@ -310,9 +313,9 @@ registered_item <- function(pu, reg, hand_drawn, name) {
   texts <- pu[pu$kind == "text", ]
   text <- if (nrow(texts) > 0L) place_text(combine_texts(texts$text), box)
 
-  quick_tibble(
-    name = name, kind = "shape", parent = NA_character_,
-    x = box[[1]], y = box[[2]], w = box[[3]], h = box[[4]], rot = 0,
+  new_item(
+    name = name, kind = "shape",
+    x = box[[1]], y = box[[2]], w = box[[3]], h = box[[4]],
     prst = prst,
     fill = if (hachure) shapes$stroke[[1]] else shapes$fill[fill_from],
     stroke = shapes$stroke[stroke_from],
@@ -320,14 +323,39 @@ registered_item <- function(pu, reg, hand_drawn, name) {
       if (is.na(fill_from)) 0 else shapes$fill_a[[fill_from]],
     stroke_a = if (is.na(stroke_from)) 0 else shapes$stroke_a[[stroke_from]],
     stroke_w = if (is.na(stroke_from)) 0 else shapes$stroke_w[[stroke_from]],
-    head = "none", tail = "none",
+    fill_grad = list(if (!hachure && !is.na(fill_from)) shapes$fill_grad[[fill_from]]),
+    stroke_grad = list(if (!is.na(stroke_from)) shapes$stroke_grad[[stroke_from]]),
+    fill_pattern = if (hachure) hatch_pattern(shapes$path[[1]]) else NA_character_,
     label = paste(texts$label, collapse = "\n"),
     flip_h = reg$flip_h, flip_v = reg$flip_v, adj = list(adj),
-    path = list(NULL), closed = TRUE,
+    closed = TRUE,
     dash = list(if (is.na(stroke_from)) NULL else shapes$dash[[stroke_from]]),
     text = list(text),
-    head_len = "med", head_w = "med", tail_len = "med", tail_w = "med", depth = 0L
+    href = first_present(pu$href),
+    depth = 0L
   )
+}
+
+# ---- hand-drawn hatching -------------------------------------------------------
+
+# Word's light line patterns, by the direction of their lines in degrees
+# clockwise from the x axis with y down (as SVG measures), modulo 180: an
+# "upward" diagonal runs up to the right. rough.js hatches at -41 degrees
+# by default, which is the upward diagonal.
+.hatch_presets <- tibble::tibble(
+  angle = c(0, 45, 90, 135),
+  prst = c("ltHorz", "ltDnDiag", "ltVert", "ltUpDiag")
+)
+
+#' The preset pattern nearest the direction of a hatch's strokes, NA when
+#' the strokes have no direction to measure
+#' @noRd
+hatch_pattern <- function(path) {
+  ang <- stroke_direction(path)
+  if (is.na(ang)) return(NA_character_)
+  # Distance between line directions, which repeat every 180 degrees.
+  gap <- abs(((.hatch_presets$angle - ang) + 90) %% 180 - 90)
+  .hatch_presets$prst[[which.min(gap)]]
 }
 
 # Built once: the table is looked up for every node.
