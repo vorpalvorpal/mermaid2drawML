@@ -56,7 +56,8 @@ for example \code{list(theme = "forest")}; see \code{\link[=render_mermaid]{rend
 
 \item{...}{Arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}, e.g. \code{max_scale}
 (default \code{1}: a diagram is drawn at natural size at most; \code{Inf} fills the
-page), \code{font_scale}, \code{word_font_family}, \code{align}, \code{alt_text}. The drawing
+page), \code{font_scale}, \code{word_font_family}, \code{align}, \code{min_stroke_pt},
+\code{alt_text}. The drawing
 is placed in line with the text, in its own paragraph.}
 }
 \value{

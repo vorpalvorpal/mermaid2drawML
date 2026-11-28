@@ -8,7 +8,8 @@
 #     the content box (the union of its prims' boxes), its orientation;
 #   - a Word end is moved along the path by the signed tip offset, so that
 #     it sits where Mermaid's marker was, and sized from the marker;
-#   - a marker Word cannot draw is instanced at the path end through ONE
+#   - a marker Word cannot draw (no end of that figure, or a round or
+#     diamond end bigger than Word's largest) is instanced at the path end through ONE
 #     affine matrix (translate the reference point to the origin, scale,
 #     rotate to the tangent, translate to the end) and its prims become
 #     ordinary scene pieces, named mermaid:marker:<id>.
@@ -44,15 +45,30 @@ marker_row <- function(id) {
 }
 
 #' What one marker end becomes: the Word end and whether it is drawn as
-#' shapes. `spec` is its read definition, or NULL when there is none.
+#' shapes. `spec` is its read definition, or NULL when there is none; with
+#' one, `stroke_w` is the width of the line it ends.
 #' @noRd
-end_plan <- function(id, spec = NULL) {
+end_plan <- function(id, spec = NULL, stroke_w = 1) {
   hit <- marker_row(id)
   shape_ok <- !is.null(spec)
+  kind <- if (hit == 0L) "triangle" else .line_end_table$kind[[hit]]
   as_shape <- if (hit == 0L) shape_ok && !spec$filled_polygon else
-    shape_ok && .line_end_table$as_shape[[hit]]
-  kind <- if (as_shape) "none" else if (hit == 0L) "triangle" else .line_end_table$kind[[hit]]
-  list(kind = kind, as_shape = as_shape)
+    shape_ok && (.line_end_table$as_shape[[hit]] || too_big_for_word(spec, kind, stroke_w))
+  list(kind = if (as_shape) "none" else kind, as_shape = as_shape)
+}
+
+# Word's largest line end is about this many line widths long.
+.word_end_max <- 5
+
+#' TRUE for a round or diamond end, which Word centres on the line end, whose
+#' marker is longer along the line than Word's largest end (H6): Mermaid's
+#' 11 px flowchart circle on a 1 px line would shrink to a dot. Ends drawn
+#' from their tip stay Word ends at any size.
+#' @noRd
+too_big_for_word <- function(spec, kind, stroke_w) {
+  centred <- identical(unname(.end_anchor[kind]), "centre")
+  centred && length(spec$prims) > 0L && !anyNA(spec$content) &&
+    spec$content[[3]] * marker_scale(spec, stroke_w) > .word_end_max * max(stroke_w, 1)
 }
 
 #' The DrawingML line end for a marker id, without its definition
@@ -236,7 +252,7 @@ end_effect <- function(id, at, pc, track, specs) {
                size = c("med", "med"), shift = c(0, 0), shapes = NULL)
   spec <- if (!is.na(id)) specs[[id]]
   if (is.null(spec)) return(none)
-  plan <- end_plan(id, spec)
+  plan <- end_plan(id, spec, pc$stroke_w)
   frame <- if (is.null(track) || nrow(track) == 0L) {
     list(point = c(NA_real_, NA_real_), dir = c(NA_real_, NA_real_))
   } else path_end_frame(track, at)

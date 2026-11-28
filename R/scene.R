@@ -20,9 +20,11 @@
 #                   inside one DOM element (a legend entry, an actor figure,
 #                   an icon) are grouped as mermaid:group:<element id, else its
 #                   first class, else "g">, made unique as x, x#2, x#3, ... in
-#                   document order, nested as the elements nest. A scope is the
-#                   element a piece was drawn in (its innermost ancestor, by
-#                   the bridge's DOM serial `n`); see "prims -> pieces".
+#                   document order, nested as the elements nest (not for an
+#                   element holding only free texts, nor one spanning the
+#                   whole drawing). A scope is the element a piece was drawn
+#                   in (its innermost ancestor, by the bridge's DOM serial
+#                   `n`); see "prims -> pieces".
 #                   A marker Word has no line end for (crow's foot, hollow
 #                   triangle or diamond, cross, sequence number circle) is
 #                   drawn as shapes (kind "shape", its strokes too) named
@@ -35,7 +37,13 @@
 #                   A stroke of no length is only its marker shapes, not
 #                   grouped when there is one (the sequence number's circle,
 #                   which takes the number as its text).
-#   kind       chr  "group" | "shape" | "line" | "text"
+#                   A box crossed by full-width horizontal lines of its own
+#                   stroke (a class or requirement box, an ER entity) is
+#                   several "rect" shapes of the box's name and paint,
+#                   stacked top to bottom with no gap (compartments), each
+#                   with its own text; the dividing lines are not items.
+#   kind       chr  "group" | "shape" | "line" | "text". A path whose box has
+#                   no width or no height is a "line" (never filled).
 #   parent     chr  `name` of the enclosing group row, NA at the top level
 #   x, y, w, h dbl  box. With rot != 0 it is the unrotated box, centred where
 #                   the item is drawn. Group rows: the union of the boxes of
@@ -51,7 +59,9 @@
 #                   "arrow", "stealth", "diamond", "oval". The path end is
 #                   moved so that Word's end sits where Mermaid's marker was
 #                   (an arrow's tip, a circle's or diamond's centre); an end
-#                   drawn as marker shapes is "none".
+#                   drawn as marker shapes is "none". A circle or diamond
+#                   longer than 5 line widths, more than Word's largest end,
+#                   is drawn as marker shapes and the path end stays.
 #   label      chr  the item's text, rows joined with "\n"; "" when none
 #
 # Internal columns:
@@ -86,7 +96,12 @@
 #                             "RRGGBB"), size (dbl, px), font (chr, the face
 #                             the browser used, may be ""), family (chr, the
 #                             CSS font-family list)
-#                   align     "left" | "center" | "right" (w:jc)
+#                   align     "left" | "center" | "right" (w:jc). Several
+#                             texts merged into one shape take the relation
+#                             their rows share (all centred, one left edge,
+#                             one right edge); a one-row HTML label off
+#                             centre takes the side it is nearer; otherwise
+#                             the anchor gives it
 #                   valign    "top" | "center" | "bottom": the body's vertical
 #                             anchor (bodyPr anchor t / ctr / b); "center" for
 #                             free text
@@ -125,7 +140,7 @@ build_scene <- function(render) {
   structure(
     list(type = render$type, viewbox = render$viewBox, title = render$title,
          desc = render$desc, unsupported = scene_unsupported(render$prims),
-         items = scene_items(pieces, render$db, render$viewBox)),
+         items = scene_items(pieces, render$db)),
     class = "mermaid_scene"
   )
 }
@@ -190,7 +205,7 @@ scene_pieces <- function(prims, viewbox, markers = NULL) {
 }
 
 zero_length <- function(p) {
-  (p$kind == "line" | p$closed %in% FALSE) & p$w <= 0.01 & p$h <= 0.01
+  (p$kind == "line" | p$closed %in% FALSE) & p$w <= .flat_px & p$h <= .flat_px
 }
 
 # A stroke of no length draws nothing in Word; one with a marker is kept,
@@ -377,28 +392,59 @@ first_arc_radius <- function(d) {
   abs(as.numeric(hit))
 }
 
+# Below this a box side is no side at all (px).
+.flat_px <- 0.01
+
 piece_outline <- function(p, local_path) {
   if (nrow(local_path) == 0L) return(NULL)
   m <- prim_matrix(p)
   path <- path_transform(local_path, m)
   paint <- prim_paint(p)
-  # A lone straight stroke is a line, whatever element drew it.
-  if (identical(path$cmd, c("M", "L")) && is.na(paint$fill)) {
-    return(line_piece(p, path$x, path$y, paint))
+  bbox <- path_bbox(path)
+  if (anyNA(bbox)) return(NULL)
+  # A lone straight stroke is a line, whatever element drew it. So is a path
+  # with no area, whatever its commands and reported fill: a fill needs an
+  # area, and Mermaid draws its box dividers as filled straight cubics.
+  flat <- min(bbox[[3]], bbox[[4]]) <= .flat_px
+  if (flat || (identical(path$cmd, c("M", "L")) && is.na(paint$fill))) {
+    ends <- segment_ends(path, bbox)
+    return(line_piece(p, ends$x, ends$y, paint))
   }
   closed <- path_closed(path)
   # Closing an open outline would add a stroked side, so only an unstroked
-  # open rectangle may become the preset.
-  rect <- if (closed || is.na(paint$stroke)) path_as_rect(close_subpath(path))
-  box <- if (is.null(rect)) path_bbox(path) else rect
-  if (anyNA(box)) return(NULL)
-  figure <- if (is.null(rect)) path_figure(path, box) else
-    list(prst = "rect", adj = numeric(), corner_r = NA_real_)
+  # open outline may become a preset.
+  figure <- if (closed || is.na(paint$stroke)) closed_figure(close_subpath(path)) else
+    no_figure(bbox)
   arc_r <- if (identical(p$kind, "path")) first_arc_radius(p$geom$d) * mat_scale(m) else NA_real_
-  new_piece(p, "shape", box, prst = figure$prst, adj = figure$adj,
+  new_piece(p, "shape", figure$box, prst = figure$prst, adj = figure$adj,
             paint = paint, path = path, closed = closed || !is.na(figure$prst),
             corner_r = if (!is.na(figure$corner_r)) figure$corner_r else
               if (isTRUE(arc_r > 0)) arc_r else NA_real_)
+}
+
+# The two ends of the segment a straight or flat path draws: its box, run
+# from where the path starts towards where it ends.
+segment_ends <- function(path, box) {
+  ends <- path_ends(path)
+  n <- length(ends$x)
+  x <- c(box[[1]], box[[1]] + box[[3]])
+  y <- c(box[[2]], box[[2]] + box[[4]])
+  list(x = if (ends$x[[n]] < ends$x[[1]]) rev(x) else x,
+       y = if (ends$y[[n]] < ends$y[[1]]) rev(y) else y)
+}
+
+no_figure <- function(box) {
+  list(box = box, prst = NA_character_, adj = numeric(), corner_r = NA_real_)
+}
+
+#' The preset a closed path draws and its box: a four-corner outline is the
+#' rect, then the figures of `.path_figures`; prst NA for none
+#' @noRd
+closed_figure <- function(path) {
+  rect <- path_as_rect(path)
+  if (!is.null(rect)) return(list(box = rect, prst = "rect", adj = numeric(), corner_r = NA_real_))
+  box <- path_bbox(path)
+  c(list(box = box), path_figure(path, box))
 }
 
 # Word presets that some closed paths draw exactly, tried in order; each
@@ -473,7 +519,7 @@ prim_piece <- function(p) {
   if (is.null(convert)) NULL else convert(p)
 }
 
-# ---- folding pieces (3a, 3b; step 2 B2, B5, B6, B8) ---------------------------
+# ---- folding pieces (3a, 3b; step 2 B2, B5, B6, B8, H2) -----------------------
 
 #' Apply the generic rules to the pieces of a unit, or to everything outside
 #' any unit, in paint order
@@ -483,6 +529,7 @@ fold_pieces <- function(p) {
     collapse_html_boxes() |>
     frame_rects() |>
     pair_by_box() |>
+    split_compartments() |>
     merge_texts()
 }
 
@@ -637,9 +684,9 @@ same_figure <- function(p, i, j, tol) {
 }
 
 #' Pieces drawing one box as one: geometry from the first preset (else the
-#' first filled piece's path, else the first piece's, closed), fill from the
-#' first filled piece, stroke from the last stroked one, name and place from
-#' the first
+#' first filled piece's path, else the first piece's, closed, and then the
+#' preset that closed path draws, if any), fill from the first filled piece,
+#' stroke from the last stroked one, name and place from the first
 #' @noRd
 fold_box <- function(pieces) {
   filled <- which(!is.na(pieces$fill))
@@ -650,7 +697,7 @@ fold_box <- function(pieces) {
   geometry <- c("x", "y", "w", "h", "rot", "prst", "adj", "path", "corner_r",
                 "flip_h", "flip_v", "src")
   out[geometry] <- pieces[geo, geometry]
-  if (is.na(out$prst)) out$path <- list(close_subpaths(out$path[[1]]))
+  if (is.na(out$prst)) out <- as_closed_figure(out)
   out$closed <- TRUE
   f <- if (length(filled) > 0L) filled[[1]] else NA_integer_
   out$fill <- pieces$fill[f]
@@ -661,6 +708,22 @@ fold_box <- function(pieces) {
   out$stroke_w <- if (is.na(k)) 0 else pieces$stroke_w[[k]]
   out$dash <- list(if (is.na(k)) NULL else pieces$dash[[k]])
   out
+}
+
+# A folded custom piece with its path closed, as the preset that closed path
+# draws when there is one: Mermaid's class box is an open four-corner path
+# under a rough outline, which together are one rectangle.
+as_closed_figure <- function(piece) {
+  path <- close_subpaths(piece$path[[1]])
+  if (is.null(path) || nrow(path) == 0L) return(piece)
+  piece$path <- list(path)
+  figure <- closed_figure(path)
+  if (is.na(figure$prst)) return(piece)
+  piece[c("x", "y", "w", "h")] <- as.list(figure$box)
+  piece$prst <- figure$prst
+  piece$adj <- list(figure$adj)
+  if (!is.na(figure$corner_r)) piece$corner_r <- figure$corner_r
+  piece
 }
 
 pair_by_box <- function(p) {
@@ -674,6 +737,70 @@ pair_by_box <- function(p) {
   })
   out <- purrr::list_rbind(folded)
   out[order(out$pos), ]
+}
+
+# -- H2: compartments -----------------------------------------------------------------
+
+# The element that holds a piece's own element: the scope's parent, or the
+# scope itself at the top of the chain; NA for a child of the root.
+scope_holder <- function(chain) {
+  k <- length(chain)
+  if (k == 0L) NA_integer_ else chain[[max(1L, k - 1L)]]
+}
+
+same_dash <- function(a, b) identical(as.numeric(a), as.numeric(b))
+
+#' The rows (of `lines`) that divide shape `s`: horizontal, reaching both its
+#' sides within max(1 px, 1 % of its width), more than 1 px inside its top
+#' and bottom, drawn with its stroke, under the element that holds its own
+#' @noRd
+dividers_of <- function(p, s, lines) {
+  tol <- max(1, 0.01 * p$w[[s]])
+  right <- p$x[[s]] + p$w[[s]]
+  holder <- scope_holder(p$chain[[s]])
+  ok <- abs(p$x[lines] - p$x[[s]]) <= tol &
+    abs(p$x[lines] + p$w[lines] - right) <= tol &
+    p$y[lines] > p$y[[s]] + 1 & p$y[lines] < p$y[[s]] + p$h[[s]] - 1 &
+    p$stroke[lines] %in% p$stroke[[s]] & abs(p$stroke_w[lines] - p$stroke_w[[s]]) < 1e-6 &
+    purrr::map_lgl(p$dash[lines], same_dash, p$dash[[s]]) &
+    (is.na(holder) | purrr::map_lgl(p$chain[lines], function(ch) holder %in% ch))
+  lines[ok]
+}
+
+# Where a box's compartments start and end, top to bottom: a divider drawn
+# twice (an ER entity's) cuts once.
+compartment_edges <- function(top, bottom, cuts) {
+  cuts <- sort(cuts)
+  cuts <- cuts[c(TRUE, diff(cuts) > 1)]
+  c(top, cuts, bottom)
+}
+
+# A box crossed by full-width lines of its own stroke (a class box's title,
+# attributes and methods) is drawn as stacked boxes, so that each takes its
+# own texts and the box moves as Mermaid drew it; the shared borders draw
+# the dividers, which go. Only an upright rect preset is split.
+split_compartments <- function(p) {
+  lines <- which(p$kind == "line" & unmarked(p) & p$h <= .flat_px & p$w > .flat_px)
+  boxes <- which(p$kind == "shape" & p$prst %in% "rect" & abs(p$rot) < 1e-6 &
+                   unmarked(p) & purrr::map_lgl(p$text, is.null))
+  if (length(lines) == 0L || length(boxes) == 0L) return(p)
+  cuts <- purrr::map(boxes, function(s) dividers_of(p, s, lines))
+  split <- lengths(cuts) > 0L
+  if (!any(split)) return(p)
+  boxes <- boxes[split]
+  cuts <- cuts[split]
+  edges <- purrr::map2(boxes, cuts, function(s, d) {
+    compartment_edges(p$y[[s]], p$y[[s]] + p$h[[s]], p$y[d])
+  })
+  copies <- rep(1L, nrow(p))
+  copies[unique(unlist(cuts))] <- 0L
+  copies[boxes] <- lengths(edges) - 1L
+  out <- p[rep(seq_len(nrow(p)), copies), ]
+  first <- cumsum(copies) - copies
+  at <- unlist(purrr::map2(first[boxes], copies[boxes], function(f, k) f + seq_len(k)))
+  out$y[at] <- unlist(purrr::map(edges, function(e) e[-length(e)]))
+  out$h[at] <- unlist(purrr::map(edges, diff))
+  out
 }
 
 # -- B5, B6: text into shapes -------------------------------------------------------
@@ -717,20 +844,37 @@ centre_tol <- function(side) max(1, min(4, 0.03 * side))
 
 #' Where a text goes inside the shape box it was merged into: centred, or
 #' moved by one inset, on each axis separately (B6)
+#'
+#' @param across For a stack of texts, the relation that made it one
+#'   ("center", "left" or "right"), which is then its alignment (I5); NULL
+#'   for a single text.
 #' @noRd
-place_text <- function(text, sbox) {
+place_text <- function(text, sbox, across = NULL) {
   tb <- text$box
   dx <- tb[[1]] + tb[[3]] / 2 - (sbox[[1]] + sbox[[3]] / 2)
   dy <- tb[[2]] + tb[[4]] / 2 - (sbox[[2]] + sbox[[4]] / 2)
-  centred_x <- abs(dx) <= centre_tol(sbox[[3]])
   centred_y <- abs(dy) <= centre_tol(sbox[[4]])
-  text$align <- if (centred_x) "center" else anchor_align(text$anchor)
+  # A centred stack is centred whatever its union's offset; a centred
+  # paragraph off centre keeps an inset.
+  centred_x <- if (is.null(across)) abs(dx) <= centre_tol(sbox[[3]]) else across == "center"
+  text$align <- across %||% single_align(text, dx, centred_x)
   text$valign <- if (centred_y) "center" else if (dy < 0) "top" else "bottom"
   lr <- if (centred_x) c(0, 0) else .across_insets[[text$align]](tb, sbox, dx)
   tb_ins <- if (centred_y) c(0, 0) else .down_insets[[text$valign]](tb, sbox)
   text$insets <- pmax(0, c(lr[[1]], tb_ins[[1]], lr[[2]], tb_ins[[2]]))
   text$placement <- if (centred_x && centred_y) "centre" else "inset"
   text
+}
+
+# A single text's alignment: centred when it is; else by its anchor, except
+# that a one-row HTML label takes the side it is nearer, since the bridge's
+# anchor for a shrink-wrapped div says nothing about the shape (I5).
+single_align <- function(text, dx, centred) {
+  if (centred) return("center")
+  if (isTRUE(text$html) && length(text$rows) == 1L) {
+    return(if (dx < 0) "left" else "right")
+  }
+  anchor_align(text$anchor)
 }
 
 #' Several texts as one: rows in order, the union of their boxes
@@ -744,22 +888,28 @@ combine_texts <- function(texts) {
   first
 }
 
-#' TRUE when text boxes (rows of a matrix, in y order) are rows of one label
-#' in shape box `sbox` drawing preset `prst`: no more than 1 px overlap, gaps
-#' below 0.6 x the taller neighbour, one horizontal relation to the shape,
-#' and the whole label inside the shape's figure (B5)
+#' Whether text boxes (rows of a matrix, in y order) are rows of one label in
+#' shape box `sbox` drawing preset `prst`, and how they line up: neighbours
+#' overlap by no more than 25 % of the smaller height (B5, H3), gaps are
+#' below 0.6 x the taller neighbour, the rows share one horizontal relation
+#' to the shape, and the whole label is inside the shape's figure
+#'
+#' @return "center", "left" or "right", the first relation that holds; "none"
+#'   when the boxes are not a stack.
 #' @noRd
-is_text_stack <- function(tb, sbox, prst = NA_character_) {
+stack_relation <- function(tb, sbox, prst = NA_character_) {
   k <- nrow(tb)
   overlap <- (tb[-k, 2] + tb[-k, 4]) - tb[-1, 2]
-  taller <- pmax(tb[-k, 4], tb[-1, 4])
-  rows_ok <- all(overlap <= 1) && all(-overlap < 0.6 * taller)
+  rows_ok <- all(overlap <= 0.25 * pmin(tb[-k, 4], tb[-1, 4])) &&
+    all(-overlap < 0.6 * pmax(tb[-k, 4], tb[-1, 4]))
+  if (!rows_ok || !stack_inside(union_box(tb[, 1], tb[, 2], tb[, 3], tb[, 4]), sbox, prst)) {
+    return("none")
+  }
   cx <- tb[, 1] + tb[, 3] / 2
-  centred <- all(abs(cx - (sbox[[1]] + sbox[[3]] / 2)) <= centre_tol(sbox[[3]]))
-  same_left <- diff(range(tb[, 1])) <= 1
-  same_right <- diff(range(tb[, 1] + tb[, 3])) <= 1
-  rows_ok && (centred || same_left || same_right) &&
-    stack_inside(union_box(tb[, 1], tb[, 2], tb[, 3], tb[, 4]), sbox, prst)
+  holds <- c(center = all(abs(cx - (sbox[[1]] + sbox[[3]] / 2)) <= centre_tol(sbox[[3]])),
+             left = diff(range(tb[, 1])) <= 1,
+             right = diff(range(tb[, 1] + tb[, 3])) <= 1)
+  if (any(holds)) names(holds)[holds][[1]] else "none"
 }
 
 # A stack inside an ellipse's box may still be outside the ellipse (a legend
@@ -788,8 +938,8 @@ pick_containers <- function(p, texts, shapes) {
 
 # Word users expect to click a box and edit its label, so a text that sits in
 # a shape becomes that shape's text body. Several texts in one shape merge
-# when they are the rows of one label; otherwise (a class box with its member
-# list) they all stay text boxes.
+# when they are the rows of one label (a class compartment's members);
+# otherwise they all stay text boxes.
 merge_texts <- function(p) {
   texts <- which(p$kind == "text")
   shapes <- which(p$kind == "shape" &
@@ -799,15 +949,17 @@ merge_texts <- function(p) {
   b <- box_matrix(p)
   by_shape <- split(texts[!is.na(pick)], pick[!is.na(pick)])
   by_shape <- purrr::map(by_shape, function(ts) ts[order(p$y[ts])])
-  merging <- purrr::keep(purrr::imap(by_shape, function(ts, s) {
+  # A single text has no relation (NULL); a stack has the one that made it.
+  across <- purrr::imap(by_shape, function(ts, s) {
     k <- as.integer(s)
-    length(ts) == 1L || is_text_stack(b[ts, , drop = FALSE], b[k, ], p$prst[[k]])
-  }), isTRUE)
-  into <- as.integer(names(merging))
+    if (length(ts) > 1L) stack_relation(b[ts, , drop = FALSE], b[k, ], p$prst[[k]])
+  })
+  merging <- !purrr::map_lgl(across, identical, "none")
+  into <- as.integer(names(by_shape)[merging])
   if (length(into) == 0L) return(p)
-  merged <- by_shape[names(merging)]
-  p$text[into] <- purrr::map2(merged, into, function(ts, s) {
-    place_text(combine_texts(p$text[ts]), b[s, ])
+  merged <- by_shape[merging]
+  p$text[into] <- purrr::pmap(list(merged, into, across[merging]), function(ts, s, rel) {
+    place_text(combine_texts(p$text[ts]), b[s, ], rel)
   })
   p$label[into] <- purrr::map_chr(merged, function(ts) paste(p$label[ts], collapse = "\n"))
   p[setdiff(seq_len(nrow(p)), unlist(merged)), ]
@@ -889,8 +1041,10 @@ drawn_box <- function(items) {
 # become a group `mermaid:group:<id | first class | "g">`, nested as the
 # elements nest.
 
-# A scope is grouped when it holds 2 to 40 loose items and is not the whole
-# diagram (it is under 90 % of the viewBox in at least one direction).
+# A scope is grouped when it holds 2 to 40 loose items, not all of them free
+# texts (Mermaid's edgeLabels element holds the labels of unrelated edges),
+# and is not the whole diagram (it is under 90 % of the union of all items in
+# at least one direction).
 .scope_group_limits <- list(min = 2L, max = 40L, whole = 0.9)
 
 # The anc entry for serial `n` among the ancestors of the pieces.
@@ -914,18 +1068,20 @@ unique_names <- function(base) {
 #' The scopes that become groups, deepest decided first: a scope whose loose
 #' items would form fewer than two children (items, or groups already made
 #' inside it) makes no group
+#' @param all_box The union box of every item of the diagram.
 #' @noRd
-grouped_scopes <- function(p, viewbox) {
+grouped_scopes <- function(p, all_box) {
   scopes <- unique(unlist(p$chain))
   if (length(scopes) == 0L) return(integer())
   lim <- .scope_group_limits
   members <- purrr::map(scopes, function(s) which(purrr::map_lgl(p$chain, function(ch) s %in% ch)))
   boxes <- purrr::map(members, function(m) union_box(p$x[m], p$y[m], p$w[m], p$h[m]))
   whole <- purrr::map_lgl(boxes, function(b) {
-    b[[3]] >= lim$whole * viewbox[[3]] && b[[4]] >= lim$whole * viewbox[[4]]
+    b[[3]] >= lim$whole * all_box[[3]] && b[[4]] >= lim$whole * all_box[[4]]
   })
+  only_text <- purrr::map_lgl(members, function(m) all(p$kind[m] == "text"))
   count <- lengths(members)
-  eligible <- count >= lim$min & count <= lim$max & !whole
+  eligible <- count >= lim$min & count <= lim$max & !whole & !only_text
   depth <- purrr::map2_int(scopes, members, function(s, m) match(s, p$chain[[m[[1]]]]))
   todo <- which(eligible)[order(-depth[eligible])]
   purrr::reduce(todo, function(made, k) {
@@ -943,15 +1099,16 @@ grouped_scopes <- function(p, viewbox) {
 #' Loose pieces as blocks: each item that no scope group holds, and each
 #' outermost scope group with everything in it
 #'
+#' @param all_box The union box of every item of the diagram.
 #' @return list(pos, items), one entry per block.
 #' @noRd
-scope_blocks <- function(p, viewbox) {
+scope_blocks <- function(p, all_box) {
   none <- list(pos = numeric(), items = list())
   if (nrow(p) == 0L) return(none)
   loose <- loose_entries(p)
   p <- loose$p
   entries <- loose$items
-  made <- sort(grouped_scopes(p, viewbox))
+  made <- sort(grouped_scopes(p, all_box))
   if (length(made) == 0L) return(list(pos = p$pos, items = entries))
   names(made) <- unique_names(purrr::map_chr(made, function(s) {
     scope_group_base(anc_entry(s, p$anc))

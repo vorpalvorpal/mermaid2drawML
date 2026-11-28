@@ -50,8 +50,9 @@
 #'   `list(theme = "forest")`), written as JSON and given to the bridge.
 #' @return An object of class `mermaid_render`: a list with `type`, `role`,
 #'   `viewBox` (numeric, length 4), `title`, `desc`, `svg`, `prims` (the drawn
-#'   primitives), `db` (Mermaid's node and edge data, or `NULL`) and `mermaid`
-#'   (the Mermaid version).
+#'   primitives), `markers` (the line-end markers the primitives use, by id),
+#'   `db` (Mermaid's node and edge data, or `NULL`) and `mermaid` (the
+#'   Mermaid version).
 #' @export
 render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL) {
   check_mermaid2drawml()

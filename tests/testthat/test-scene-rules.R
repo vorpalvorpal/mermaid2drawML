@@ -378,7 +378,9 @@ placed <- function(x, y, w = 40, h = 20, anchor = "middle", shape = c(0, 0, 200,
                    viewBox = c(0, 0, 400, 200)) {
   items <- generic_items(list(
     prim_rect(shape[1], shape[2], shape[3], shape[4]),
-    prim_text("t", x = x, y = y, w = w, h = h, anchor = anchor)
+    # ruling: SVG text, which I5 leaves to B6 (a one-row HTML label takes
+    # the nearer side)
+    prim_text("t", x = x, y = y, w = w, h = h, anchor = anchor, html = FALSE)
   ), viewBox = viewBox)
   testthat::expect_equal(nrow(items), 1L)
   items$text[[1]]

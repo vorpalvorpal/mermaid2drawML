@@ -112,6 +112,49 @@ test_that("a path with a thin but non-zero box keeps its fill", {
   expect_near(items$h, 0.5, tol = 1e-9)
 })
 
+# ruling: I1 makes a straight edge (a path of zero width or height, whatever
+# its commands) a line item; it keeps its direction, its marker end and the
+# C2 end move.
+test_that("ruling: a straight multi-point path with an end marker is a line that keeps its end", {
+  id <- "flowchart-v2-pointEnd"
+  run <- function(d) {
+    p <- prim_path(d, stroke = "#333333", marker_end = id)
+    generic_items(list(p), viewBox = c(0, 0, 200, 200),
+                  markers = stats::setNames(list(marker_arrow_point()), id))
+  }
+  # the 8 px point: tip 5 content units beyond refX at scale 0.8 -> +4 px
+  rtl <- run("M110,50 L60,50 L10,50")
+  expect_equal(rtl$kind, "line")
+  expect_equal(rtl$tail, "triangle")
+  expect_true(rtl$flip_h)
+  expect_near(ends_of2(rtl)$start, c(110, 50), tol = 1e-9)
+  expect_near(ends_of2(rtl)$end, c(6, 50), tol = 1e-9)
+
+  btt <- run("M50,110 L50,60 L50,10")
+  expect_equal(btt$kind, "line")
+  expect_equal(btt$tail, "triangle")
+  expect_true(btt$flip_v)
+  expect_near(ends_of2(btt)$start, c(50, 110), tol = 1e-9)
+  expect_near(ends_of2(btt)$end, c(50, 6), tol = 1e-9)
+})
+
+test_that("ruling: flowchart-paint A-B is a line whose triangle tail ends at B", {
+  items <- fixture_scene("flowchart-paint")$items
+  e <- item_named(items, "mermaid:edge:A-B")
+  expect_equal(nrow(e), 1L)
+  if (nrow(e) != 1L) return()
+  expect_equal(e$kind, "line")
+  expect_equal(e$tail, "triangle")
+  b <- item_named(items, "mermaid:node:B")
+  expect_equal(nrow(b), 1L)
+  if (nrow(b) != 1L) return()
+  ends <- ends_of2(e)
+  bb <- box4_2(b)
+  # the flips put the tail end at B, not the head end
+  expect_lt(box_gap2(c(ends$end, 0, 0), bb), 1)
+  expect_gt(box_gap2(c(ends$start, 0, 0), bb), box_gap2(c(ends$end, 0, 0), bb))
+})
+
 # -- H2: compartments --------------------------------------------------------------
 
 # A 200 x 120 box at (10, 10) and the lines drawn across it, in one scope.

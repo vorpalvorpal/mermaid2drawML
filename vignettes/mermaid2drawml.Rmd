@@ -175,16 +175,68 @@ print(doc, target = "multi.docx")
 ## Supported Mermaid Syntax
 
 Every diagram type Mermaid draws is converted: flowcharts, sequence, class,
-state, entity-relationship, Gantt, pie, mind map, timeline, XY and quadrant
-charts and the others. Flowchart node shapes that Word has a preset for
-(rectangles, rounded rectangles, stadiums, diamonds, circles, hexagons,
-parallelograms, trapezoids, cylinders, documents and more) become that
-preset; the others are drawn from their exact outline. Embedded images are
-left out with a warning.
+state, entity-relationship, requirement, Gantt, pie, mind map, timeline,
+kanban, XY, quadrant, sankey, architecture, C4 and the others. Flowchart
+node shapes that Word has a preset for (rectangles, rounded rectangles,
+stadiums, diamonds, circles, hexagons, parallelograms, trapezoids,
+cylinders, documents and more) become that preset; the others are drawn
+from their exact outline. The README lists a verdict for each type.
 
-## Shape Names
+## What comes out
 
-Each shape is named after the Mermaid element it came from, for example
-`mermaid:node:A`, `mermaid:edge:A-B`, `mermaid:edge_label:A:B` and
-`mermaid:subgraph:S1` (a group whose first shape is the subgraph's
-background). The names show in Word's Selection Pane.
+Each thing Mermaid drew is one Word object you can select, move and edit.
+The names show in Word's Selection Pane:
+
+| Name | What it is |
+|------|------------|
+| `mermaid:node:<id>` | a node: one shape, or a group of its parts |
+| `mermaid:subgraph:<id>` | a group holding the subgraph's background and members |
+| `mermaid:edge:<a>-<b>` | the line of an edge from node `a` to node `b` |
+| `mermaid:edge_label:<a>:<b>` | that edge's label |
+| `mermaid:edge_group:<a>-<b>` | an edge grouped with its marker shapes |
+| `mermaid:marker:<marker id>` | a line end Word has no end for |
+| `mermaid:group:<id or class>` | parts Mermaid drew inside one element: a legend entry, an actor, an icon |
+
+Line ends are Word's own arrow heads where Word has the figure, sized from
+Mermaid's marker and reaching the node. Ends Word cannot draw (crow's
+feet, hollow triangles and diamonds, crosses, sequence numbers, a circle
+or diamond larger than Word's largest end) are small shapes grouped with
+their line. Boxes crossed by dividers (class, requirement and ER boxes) are
+stacks of rectangles, one per compartment.
+
+Text sits inside its shape: click a box and type. Each label keeps
+Mermaid's own line breaks and is never re-wrapped; the paragraph is
+aligned as Mermaid drew it (a title stays centred, member lists stay left)
+and moved with the text box's insets where it was off centre. Text that
+belongs to no shape, such as an axis title, is a text box of its own.
+
+To restyle the result, pass these to `mermaid_to_word()` or
+`body_add_mermaid()`:
+
+- `word_font_family` sets one font for all text, and `font_scale`
+  multiplies every text size;
+- `max_scale` lets a small diagram grow to fill the page (`Inf`);
+- `min_stroke_pt` sets the thinnest line drawn;
+- `mermaid_config` passes Mermaid's own configuration, such as
+  `list(theme = "forest")`;
+- `alt_text` sets the drawing's alternative text.
+
+```{r restyle}
+diagram <- mermaid_to_word(
+  "classDiagram\n  class Animal {\n    +String name\n    +eat() void\n  }",
+  word_font_family = "Calibri",
+  font_scale = 0.9,
+  min_stroke_pt = 1,
+  alt_text = "The Animal class"
+)
+```
+
+## Limits
+
+- Embedded images and icon fonts are left out, with a warning.
+- Hyperlinks (`click`) are not carried over.
+- Text transparency is ignored, and gradients become flat colours.
+- The hand-drawn look loses its hatching.
+- Lines are not glued to shapes: moving a node does not drag its edges.
+  Groups keep a node's parts together.
+- Text is not re-wrapped: labels keep Mermaid's line breaks.

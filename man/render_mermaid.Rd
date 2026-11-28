@@ -19,8 +19,9 @@ start the first time.}
 \value{
 An object of class \code{mermaid_render}: a list with \code{type}, \code{role},
 \code{viewBox} (numeric, length 4), \code{title}, \code{desc}, \code{svg}, \code{prims} (the drawn
-primitives), \code{db} (Mermaid's node and edge data, or \code{NULL}) and \code{mermaid}
-(the Mermaid version).
+primitives), \code{markers} (the line-end markers the primitives use, by id),
+\code{db} (Mermaid's node and edge data, or \code{NULL}) and \code{mermaid} (the
+Mermaid version).
 }
 \description{
 Runs the package's Node bridge (\code{inst/node/mermaid_bridge.js}), which has

@@ -601,7 +601,7 @@ nest_level <- function(gid, gname, blocks, seen = character()) {
 #' Scene items from pieces: units assembled by their rules, everything else
 #' by the generic ones (and grouped by scope), nested into subgraph groups
 #' @noRd
-scene_items <- function(pieces, db, viewbox) {
+scene_items <- function(pieces, db) {
   nodes <- db_node_table(db)
   edges <- db_edge_table(db)
   pu <- piece_units(pieces, nodes)
@@ -610,7 +610,8 @@ scene_items <- function(pieces, db, viewbox) {
   in_unit <- !is.na(pu$key)
   by_unit <- split(pieces[in_unit, ], factor(pu$key[in_unit], levels = units$key))
   unit_rows <- split(units, seq_len(nrow(units)))
-  loose <- scope_blocks(fold_pieces(pieces[!in_unit, ]), viewbox)
+  loose <- scope_blocks(fold_pieces(pieces[!in_unit, ]),
+                        union_box(pieces$x, pieces$y, pieces$w, pieces$h))
   blocks <- purrr::list_rbind(c(
     list(new_blocks(character(), numeric(), list())),
     purrr::map2(unit_rows, by_unit, function(u, p) .unit_builders[[u$kind]](u, p)),

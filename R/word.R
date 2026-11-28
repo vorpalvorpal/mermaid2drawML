@@ -123,7 +123,8 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
 #'   never produce duplicate ids. An explicit value is used as given.
 #' @param ... Arguments passed to [build_diagram_xml()], e.g. `max_scale`
 #'   (default `1`: a diagram is drawn at natural size at most; `Inf` fills the
-#'   page), `font_scale`, `word_font_family`, `align`, `alt_text`. The drawing
+#'   page), `font_scale`, `word_font_family`, `align`, `min_stroke_pt`,
+#'   `alt_text`. The drawing
 #'   is placed in line with the text, in its own paragraph.
 #' @return The modified `rdocx` object (invisibly).
 #' @examples

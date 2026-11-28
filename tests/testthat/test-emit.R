@@ -536,7 +536,8 @@ test_that("flowchart-paint XML: one edge shape per drawn link, styled from the p
     # step 2: C2, the 8 px flowchart point is "lg" on a 1 px edge, "sm" at 3.5 px
     size <- if (identical(nm, "mermaid:edge:E-C")) "sm" else "lg"
     expect_equal(c(ln$tail_w, ln$tail_len), c(size, size), info = nm)
-    expect_true(shape_is_custom(e), info = nm)
+    # ruling: I1, a straight edge is a preset line
+    expect_true(shape_is_custom(e) || identical(shape_prst(e), "line"), info = nm)
     expect_false(is_missing_node(xfirst(e, "./wps:cNvCnPr")), info = nm)
   }
   dash <- function(name) shape_ln(shape_named(doc, name))$dash

@@ -65,7 +65,8 @@ test_that("flowchart-paint: one edge item per drawn link and none for F ~~~ A", 
   edges <- items[named_like(items, "mermaid:edge:"), ]
   expect_setequal(edges$name, c(edge_name("A", "B"), edge_name("B", "C"),
                                 edge_name("B", "D"), edge_name("E", "C")))
-  expect_true(all(edges$kind == "shape"))
+  # ruling: I1, a straight edge (a path of zero width) is a line item
+  expect_true(all(edges$kind %in% c("shape", "line")))
   expect_true(all(is.na(edges$fill)))
   expect_true(all(edges$stroke == "333333"))
   expect_true(all(edges$tail == "triangle"))

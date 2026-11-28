@@ -23,6 +23,27 @@
   odd and flag shapes, stacked rectangles and others) are drawn from their
   real outline instead of an approximation.
 
+* Boxes of class, ER, state and requirement diagrams are one shape each,
+  not a fill and an outline drawn twice. Class and requirement boxes are
+  stacks of compartments (title, attributes, methods), each holding its
+  own text.
+
+* Line ends reach their nodes and take the size of Mermaid's markers.
+  Markers Word has no line end for (crow's feet, hollow triangles and
+  diamonds, crosses, sequence numbers, and circles or diamonds larger than
+  Word's largest end) are drawn as small shapes, grouped with their line.
+
+* A mark Mermaid draws from several parts (a legend entry, an actor, an
+  icon) is one group.
+
+* Simple paths become Word presets: circles, rounded rectangles, straight
+  lines, and the four-line frames of sequence diagrams as rectangles.
+
+* Titles and other centred labels stay centred when edited in Word; member
+  lists stay left-aligned.
+
+* Building the scene is about 3.5 times faster.
+
 * Cylinders have their true height. The horizontal (`h-cyl`) and lined
   (`lin-cyl`) cylinders are no longer swapped.
 

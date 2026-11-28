@@ -31,7 +31,8 @@ test_that("a text below the shape's centre is anchored b with only the bottom in
 test_that("a text centred vertically but not across is anchored ctr with one side inset", {
   # anchor middle, centre 10 px right of the shape's: l = 20
   bp <- body_of(list(prim_rect(0, 0, 200, 100),
-                     prim_text("Off", x = 90, y = 40, w = 40, h = 20, anchor = "middle")))
+                     prim_text("Off", x = 90, y = 40, w = 40, h = 20, anchor = "middle",
+                               html = FALSE)))  # ruling: SVG text keeps B6 (I5)
   expect_equal(bp[["anchor"]], "ctr")
   expect_near(insets_of(bp), c(20, 0, 0, 0) * 9525, tol = 2)
 })
