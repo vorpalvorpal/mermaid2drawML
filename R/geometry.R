@@ -91,48 +91,62 @@ poly_path <- function(points, closed) {
 .arity <- c(M = 2L, L = 2L, H = 1L, V = 1L, C = 6L, S = 4L, Q = 4L, T = 2L,
             A = 7L, Z = 0L)
 
-# Argument rows (one row per repeat of the command) as a numeric matrix.
-path_args <- function(op, text) {
-  k <- .arity[[toupper(op)]]
-  if (k == 0L) return(matrix(numeric(), 0L, 0L))
-  if (toupper(op) == "A") {
-    m <- stringr::str_match_all(text, .arc_re)[[1]][, -1, drop = FALSE]
-    storage.mode(m) <- "numeric"
-    return(m)
-  }
-  v <- as.numeric(stringr::str_extract_all(text, .num_re)[[1]])
-  n <- length(v) %/% k
-  matrix(v[seq_len(n * k)], nrow = n, ncol = k, byrow = TRUE)
-}
-
-# One command letter with its arguments becomes one or more simple commands;
-# repeated pairs after M are implicit linetos.
-path_commands <- function(op, text) {
-  args <- path_args(op, text)
-  if (toupper(op) == "Z") return(list(list(op = op, a = numeric())))
-  rows <- purrr::map(seq_len(nrow(args)), ~ args[.x, ])
-  ops <- c(op, rep(if (op == "M") "L" else if (op == "m") "l" else op,
-                   max(length(rows) - 1L, 0L)))
-  purrr::map2(ops[seq_along(rows)], rows, ~ list(op = .x, a = .y))
-}
-
-path_tokenise <- function(d) {
+#' Command letters and their numbers
+#'
+#' @return NULL when `d` is not a path; else list(ops, args): the command
+#'   letters as written and, for each, the numbers that follow it (arc flags
+#'   are single characters and may be packed, so arcs have their own pattern).
+#' @noRd
+path_tokens <- function(d) {
   segs <- stringr::str_match_all(
     d, paste0("([", .cmd_chars, "])([^", .cmd_chars, "]*)"))[[1]]
   # A path must start with a moveto; anything else is not a path.
-  if (nrow(segs) == 0L || !segs[1, 2] %in% c("M", "m")) return(list())
-  purrr::list_flatten(purrr::map2(segs[, 2], segs[, 3], path_commands))
+  if (nrow(segs) == 0L || !segs[1, 2] %in% c("M", "m")) return(NULL)
+  ops <- segs[, 2]
+  args <- lapply(stringr::str_extract_all(segs[, 3], .num_re), as.numeric)
+  is_arc <- toupper(ops) == "A"
+  if (any(is_arc)) {
+    arcs <- stringr::str_match_all(segs[is_arc, 3], .arc_re)
+    args[is_arc] <- lapply(arcs, function(m) as.numeric(t(m[, -1L, drop = FALSE])))
+  }
+  list(ops = ops, args = args)
+}
+
+#' One simple command per repeat of each command letter
+#'
+#' Repeated argument groups after M are implicit linetos; numbers left over
+#' after the last whole group are ignored.
+#' @return list(ops, args, start): the simple commands, all their numbers in
+#'   one vector, and where each command's numbers begin (0-based).
+#' @noRd
+path_simple_commands <- function(tokens) {
+  k <- unname(.arity[toupper(tokens$ops)])
+  reps <- ifelse(k == 0L, 1L, lengths(tokens$args) %/% pmax(k, 1L))
+  used <- purrr::map2(tokens$args, k * reps, function(a, n) a[seq_len(n)])
+  ops <- rep(tokens$ops, reps)
+  later <- sequence(reps) > 1L
+  ops[later & ops == "M"] <- "L"
+  ops[later & ops == "m"] <- "l"
+  width <- rep(k, reps)
+  list(ops = ops, args = unlist(used, use.names = FALSE),
+       start = cumsum(c(0L, width))[seq_along(ops)])
 }
 
 # ---- arcs -------------------------------------------------------------------
 
-# Endpoint parameterisation to centre parameterisation (SVG 1.1 F.6.5), then
-# one cubic per at most 90 degrees.
-arc_to_cubics <- function(x0, y0, rx, ry, phi_deg, fa, fs, x, y) {
-  if (x0 == x && y0 == y) return(path_tbl())
+#' An elliptical arc as segments
+#'
+#' Endpoint parameterisation to centre parameterisation (SVG 1.1 F.6.5), then
+#' one cubic per at most 90 degrees.
+#' @return A numeric matrix, columns x1, y1, x2, y2, x, y, one row per
+#'   segment: cubics, or one line (NA control points) when a radius is zero;
+#'   no rows when the arc starts where it ends.
+#' @noRd
+arc_segments <- function(x0, y0, rx, ry, phi_deg, fa, fs, x, y) {
+  if (x0 == x && y0 == y) return(matrix(numeric(), 0L, 6L))
   rx <- abs(rx)
   ry <- abs(ry)
-  if (rx == 0 || ry == 0) return(path_tbl("L", x = x, y = y))
+  if (rx == 0 || ry == 0) return(matrix(c(NA, NA, NA, NA, x, y), 1L, 6L))
 
   phi <- phi_deg * pi / 180
   cp <- cos(phi)
@@ -179,65 +193,123 @@ arc_to_cubics <- function(x0, y0, rx, ry, phi_deg, fa, fs, x, y) {
   # Land exactly on the requested end point whatever the rounding.
   ex[n] <- x
   ey[n] <- y
-  path_tbl(rep("C", n), x1 = px(a1) + k * dpx(a1), y1 = py(a1) + k * dpy(a1),
-           x2 = ex - k * dpx(a2), y2 = ey - k * dpy(a2),
-           x = ex, y = ey)
+  cbind(px(a1) + k * dpx(a1), py(a1) + k * dpy(a1),
+        ex - k * dpx(a2), ey - k * dpy(a2), ex, ey)
 }
 
-# ---- path folding -----------------------------------------------------------
+# ---- walking the commands -----------------------------------------------------
 
-# Parser state: current point, subpath start, and the last control point with
-# its kind (for S and T reflection).
-path_init <- function() {
-  list(x = 0, y = 0, sx = 0, sy = 0, cx = 0, cy = 0, ck = "",
-       rows = path_tbl())
-}
-
-# One simple command applied to the state: returns the new state, whose `rows`
-# are the absolute segments that command produced.
-path_step <- function(s, cmd) {
-  op <- cmd$op
-  a <- cmd$a
-  ox <- if (op == tolower(op)) s$x else 0
-  oy <- if (op == tolower(op)) s$y else 0
-  moved <- function(rows, x, y, cx = x, cy = y, ck = "", sx = s$sx, sy = s$sy) {
-    list(x = x, y = y, sx = sx, sy = sy, cx = cx, cy = cy, ck = ck, rows = rows)
+#' Absolute M, L, C and Z segments from simple commands
+#'
+#' One loop over the commands, carrying the current point, the subpath start
+#' and the last control point with its kind (for S and T reflection) in local
+#' variables and writing segments into a preallocated matrix: a tibble per
+#' command made long paths (Mermaid's hand-drawn outlines) slow.
+#' @noRd
+path_walk <- function(ops, args, start) {
+  ups <- toupper(ops)
+  # An arc is at most four cubics.
+  size <- sum(ifelse(ups == "A", 4L, 1L))
+  seg <- matrix(NA_real_, size, 6L)
+  cmd <- character(size)
+  j <- 0L
+  x <- 0
+  y <- 0
+  sx <- 0
+  sy <- 0
+  cx <- 0
+  cy <- 0
+  ck <- ""
+  for (i in seq_along(ops)) {
+    up <- ups[[i]]
+    v <- args[start[[i]] + seq_len(.arity[[up]])]
+    rel <- ops[[i]] != up
+    ox <- if (rel) x else 0
+    oy <- if (rel) y else 0
+    if (up == "Z") {
+      j <- j + 1L
+      cmd[[j]] <- "Z"
+      x <- sx
+      y <- sy
+      cx <- x
+      cy <- y
+      ck <- ""
+      next
+    }
+    if (up %in% c("M", "L", "H", "V")) {
+      nx <- switch(up, V = x, v[[1]] + ox)
+      ny <- switch(up, H = y, V = v[[1]] + oy, v[[2]] + oy)
+      j <- j + 1L
+      cmd[[j]] <- if (up == "M") "M" else "L"
+      seg[j, 5:6] <- c(nx, ny)
+      if (up == "M") {
+        sx <- nx
+        sy <- ny
+      }
+      x <- nx
+      y <- ny
+      cx <- x
+      cy <- y
+      ck <- ""
+      next
+    }
+    if (up == "A") {
+      nx <- v[[6]] + ox
+      ny <- v[[7]] + oy
+      rows <- arc_segments(x, y, v[[1]], v[[2]], v[[3]], v[[4]], v[[5]], nx, ny)
+      k <- nrow(rows)
+      if (k > 0L) {
+        seg[j + seq_len(k), ] <- rows
+        cmd[j + seq_len(k)] <- ifelse(is.na(rows[, 1]), "L", "C")
+        j <- j + k
+      }
+      x <- nx
+      y <- ny
+      cx <- x
+      cy <- y
+      ck <- ""
+      next
+    }
+    # Curves: C and S are cubics; Q and T are quadratics raised to cubics
+    # with the same shape.
+    reflect_x <- 2 * x - cx
+    reflect_y <- 2 * y - cy
+    if (up %in% c("C", "S")) {
+      if (up == "C") {
+        c1 <- c(v[[1]] + ox, v[[2]] + oy)
+        v <- v[3:6]
+      } else {
+        c1 <- if (ck == "C") c(reflect_x, reflect_y) else c(x, y)
+      }
+      c2 <- c(v[[1]] + ox, v[[2]] + oy)
+      end <- c(v[[3]] + ox, v[[4]] + oy)
+      ck <- "C"
+      ctrl <- c2
+    } else {
+      if (up == "Q") {
+        q <- c(v[[1]] + ox, v[[2]] + oy)
+        v <- v[3:4]
+      } else {
+        q <- if (ck == "Q") c(reflect_x, reflect_y) else c(x, y)
+      }
+      end <- c(v[[1]] + ox, v[[2]] + oy)
+      c1 <- c(x, y) + 2 / 3 * (q - c(x, y))
+      c2 <- end + 2 / 3 * (q - end)
+      ck <- "Q"
+      ctrl <- q
+    }
+    j <- j + 1L
+    cmd[[j]] <- "C"
+    seg[j, ] <- c(c1, c2, end)
+    x <- end[[1]]
+    y <- end[[2]]
+    cx <- ctrl[[1]]
+    cy <- ctrl[[2]]
   }
-  cubic <- function(x1, y1, x2, y2, x, y, ck = "C", cx = x2, cy = y2) {
-    moved(path_tbl("C", x1, y1, x2, y2, x, y), x, y, cx, cy, ck)
-  }
-  # A quadratic raised to a cubic with the same shape.
-  quad <- function(qx, qy, x, y) {
-    cubic(s$x + 2 / 3 * (qx - s$x), s$y + 2 / 3 * (qy - s$y),
-          x + 2 / 3 * (qx - x), y + 2 / 3 * (qy - y), x, y,
-          ck = "Q", cx = qx, cy = qy)
-  }
-  switch(
-    toupper(op),
-    M = moved(path_tbl("M", x = a[1] + ox, y = a[2] + oy),
-              a[1] + ox, a[2] + oy, sx = a[1] + ox, sy = a[2] + oy),
-    L = moved(path_tbl("L", x = a[1] + ox, y = a[2] + oy), a[1] + ox, a[2] + oy),
-    H = moved(path_tbl("L", x = a[1] + ox, y = s$y), a[1] + ox, s$y),
-    V = moved(path_tbl("L", x = s$x, y = a[1] + oy), s$x, a[1] + oy),
-    C = cubic(a[1] + ox, a[2] + oy, a[3] + ox, a[4] + oy, a[5] + ox, a[6] + oy),
-    S = {
-      reflect <- s$ck == "C"
-      cubic(if (reflect) 2 * s$x - s$cx else s$x,
-            if (reflect) 2 * s$y - s$cy else s$y,
-            a[1] + ox, a[2] + oy, a[3] + ox, a[4] + oy)
-    },
-    Q = quad(a[1] + ox, a[2] + oy, a[3] + ox, a[4] + oy),
-    T = {
-      reflect <- s$ck == "Q"
-      quad(if (reflect) 2 * s$x - s$cx else s$x,
-           if (reflect) 2 * s$y - s$cy else s$y,
-           a[1] + ox, a[2] + oy)
-    },
-    A = moved(arc_to_cubics(s$x, s$y, a[1], a[2], a[3], a[4], a[5],
-                            a[6] + ox, a[7] + oy),
-              a[6] + ox, a[7] + oy),
-    Z = moved(path_tbl("Z"), s$sx, s$sy)
-  )
+  keep <- seq_len(j)
+  tibble::tibble(cmd = cmd[keep], x1 = seg[keep, 1], y1 = seg[keep, 2],
+                 x2 = seg[keep, 3], y2 = seg[keep, 4], x = seg[keep, 5],
+                 y = seg[keep, 6])
 }
 
 #' Parse SVG path data into absolute M, L, C and Z segments
@@ -248,10 +320,11 @@ path_step <- function(s, cmd) {
 #' @noRd
 path_parse <- function(d) {
   if (length(d) != 1L || is.na(d)) return(path_tbl())
-  cmds <- path_tokenise(d)
-  if (length(cmds) == 0L) return(path_tbl())
-  states <- purrr::accumulate(cmds, path_step, .init = path_init())[-1]
-  purrr::list_rbind(purrr::map(states, "rows"))
+  tokens <- path_tokens(d)
+  if (is.null(tokens)) return(path_tbl())
+  cmds <- path_simple_commands(tokens)
+  if (length(cmds$ops) == 0L) return(path_tbl())
+  path_walk(cmds$ops, cmds$args, cmds$start)
 }
 
 # ---- path operations ---------------------------------------------------------
@@ -358,4 +431,165 @@ path_as_rect <- function(path, tol = 0.01) {
     (all(vertical[c(1, 3)]) && all(horizontal[c(2, 4)]))
   if (!ok) return(NULL)
   c(min(pts$x), min(pts$y), diff(range(pts$x)), diff(range(pts$y)))
+}
+
+# ---- recognising figures -----------------------------------------------------
+
+#' The drawn segments of a path: where each starts and ends and its midpoint
+#' (a cubic evaluated at t = 0.5); a Z that closes no gap draws nothing
+#' @noRd
+path_segments <- function(path) {
+  ends <- path_ends(path)
+  x0 <- c(NA_real_, utils::head(ends$x, -1L))
+  y0 <- c(NA_real_, utils::head(ends$y, -1L))
+  is_c <- path$cmd == "C"
+  mid <- function(p0, p1, p2, p3) ifelse(is_c, (p0 + 3 * p1 + 3 * p2 + p3) / 8, (p0 + p3) / 2)
+  seg <- tibble::tibble(cmd = path$cmd, x0 = x0, y0 = y0, x = ends$x, y = ends$y,
+                        mx = mid(x0, path$x1, path$x2, ends$x),
+                        my = mid(y0, path$y1, path$y2, ends$y))
+  gap <- abs(seg$x - seg$x0) + abs(seg$y - seg$y0)
+  seg[seg$cmd != "M" & !(seg$cmd == "Z" & gap <= 1e-9), ]
+}
+
+# One closed subpath: the only kind of path a preset can stand for.
+single_closed <- function(path) {
+  nrow(path) > 0L && sum(path$cmd == "M") == 1L && path_closed(path)
+}
+
+#' TRUE when a closed path of at least four segments has every segment end
+#' and midpoint within `tol` of the ellipse inscribed in `box`
+#'
+#' The distance is measured along the ray from the centre, which for the
+#' near-circles this is meant for is the distance to the curve.
+#' @noRd
+path_on_ellipse <- function(path, box, tol) {
+  if (!single_closed(path)) return(FALSE)
+  seg <- path_segments(path)
+  a <- box[[3]] / 2
+  b <- box[[4]] / 2
+  if (nrow(seg) < 4L || a <= 0 || b <= 0) return(FALSE)
+  dx <- c(seg$x, seg$mx) - (box[[1]] + a)
+  dy <- c(seg$y, seg$my) - (box[[2]] + b)
+  r <- sqrt((dx / a)^2 + (dy / b)^2)
+  dist <- ifelse(r > 0, abs(1 - 1 / r) * sqrt(dx^2 + dy^2), min(a, b))
+  all(dist <= tol)
+}
+
+#' The common corner radius of a closed path that is a rectangle with four
+#' equal round corners, or NA
+#'
+#' Every segment end and midpoint lies on the box boundary, except inside the
+#' four corner squares of side r, where it stays outside the square inscribed
+#' in the corner circle (an arc passes its corner, a straight snip cuts
+#' through it). r is where the straight sides stop, the same at all four
+#' corners along both sides, and some straight side remains.
+#' @noRd
+path_corner_radius <- function(path, box, tol) {
+  if (!single_closed(path)) return(NA_real_)
+  seg <- path_segments(path)
+  px <- c(seg$x, seg$mx)
+  py <- c(seg$y, seg$my)
+  x0 <- box[[1]]
+  y0 <- box[[2]]
+  x1 <- x0 + box[[3]]
+  y1 <- y0 + box[[4]]
+  on <- list(left = abs(px - x0) <= tol, right = abs(px - x1) <= tol,
+             top = abs(py - y0) <= tol, bottom = abs(py - y1) <= tol)
+  ends_along <- function(v, keep, lo, hi) {
+    if (!any(keep)) return(c(Inf, Inf))
+    c(min(v[keep]) - lo, hi - max(v[keep]))
+  }
+  rs <- c(ends_along(px, on$top, x0, x1), ends_along(px, on$bottom, x0, x1),
+          ends_along(py, on$left, y0, y1), ends_along(py, on$right, y0, y1))
+  r <- mean(rs)
+  # With no straight side at all the figure is a circle or worse, which is
+  # the ellipse rule's to decide.
+  if (!all(is.finite(rs)) || diff(range(rs)) > tol || r <= tol ||
+      r > min(box[[3]], box[[4]]) / 2 + tol || r >= max(box[[3]], box[[4]]) / 2 - tol) {
+    return(NA_real_)
+  }
+  boundary <- on$left | on$right | on$top | on$bottom
+  # Corner circle centres, with the direction that points at their corner.
+  corners <- tibble::tibble(cx = c(x0 + r, x1 - r, x1 - r, x0 + r),
+                            cy = c(y0 + r, y0 + r, y1 - r, y1 - r),
+                            sx = c(-1, 1, 1, -1), sy = c(-1, -1, 1, 1))
+  half <- r / sqrt(2)
+  in_corner <- purrr::pmap(corners, function(cx, cy, sx, sy) {
+    ux <- sx * (px - cx)
+    uy <- sy * (py - cy)
+    ux >= -tol & ux <= r + tol & uy >= -tol & uy <= r + tol &
+      (ux >= half - tol | uy >= half - tol)
+  })
+  if (all(boundary | Reduce(`|`, in_corner))) r else NA_real_
+}
+
+#' Every end point and segment midpoint of a path, as a tibble x, y
+#' @noRd
+path_points <- function(path) {
+  seg <- path_segments(path)
+  starts <- path[path$cmd == "M", c("x", "y")]
+  tibble::tibble(x = c(starts$x, seg$x, seg$mx), y = c(starts$y, seg$y, seg$my))
+}
+
+# Distance of points from the boundary of box c(x, y, w, h).
+box_boundary_dist <- function(x, y, box) {
+  x0 <- box[[1]]
+  y0 <- box[[2]]
+  x1 <- x0 + box[[3]]
+  y1 <- y0 + box[[4]]
+  # Beyond the box on either axis, plus the way to the nearest side inside it.
+  out <- sqrt(pmax(0, x0 - x, x - x1)^2 + pmax(0, y0 - y, y - y1)^2)
+  inside <- pmin(abs(x - x0), abs(x - x1), abs(y - y0), abs(y - y1))
+  ifelse(out > 0, out, inside)
+}
+
+# Distance of points from the ellipse inscribed in a box, along the ray from
+# its centre (see path_on_ellipse()).
+ellipse_dist <- function(x, y, box) {
+  a <- box[[3]] / 2
+  b <- box[[4]] / 2
+  if (a <= 0 || b <= 0) return(rep(Inf, length(x)))
+  dx <- x - (box[[1]] + a)
+  dy <- y - (box[[2]] + b)
+  r <- sqrt((dx / a)^2 + (dy / b)^2)
+  ifelse(r > 0, abs(1 - 1 / r) * sqrt(dx^2 + dy^2), min(a, b))
+}
+
+# TRUE for points inside one of the four corner squares of side r of a box.
+in_corner_squares <- function(x, y, box, r) {
+  near_x <- x <= box[[1]] + r | x >= box[[1]] + box[[3]] - r
+  near_y <- y <= box[[2]] + r | y >= box[[2]] + box[[4]] - r
+  near_x & near_y
+}
+
+# How far points may be from each preset's figure; presets not listed are
+# figures no path is compared with.
+.figure_dist <- list(
+  rect = function(x, y, box, r) box_boundary_dist(x, y, box),
+  ellipse = function(x, y, box, r) ellipse_dist(x, y, box),
+  roundRect = function(x, y, box, r) {
+    r <- if (is.na(r)) 0 else r
+    ifelse(in_corner_squares(x, y, box, r), 0, box_boundary_dist(x, y, box))
+  }
+)
+
+#' TRUE when every end point and midpoint of `path` lies within `tol` of the
+#' figure the preset `prst` draws in `box` (`r`: a roundRect's corner radius)
+#' @noRd
+path_on_figure <- function(path, prst, box, tol, r = NA_real_) {
+  dist <- .figure_dist[[prst]]
+  if (is.null(dist) || is.null(path) || nrow(path) == 0L) return(FALSE)
+  pts <- path_points(path)
+  all(dist(pts$x, pts$y, box, r) <= tol)
+}
+
+#' TRUE when box `inner` lies inside the ellipse inscribed in box `outer`
+#' @noRd
+box_in_ellipse <- function(inner, outer) {
+  a <- outer[[3]] / 2
+  b <- outer[[4]] / 2
+  if (a <= 0 || b <= 0) return(FALSE)
+  cx <- c(inner[[1]], inner[[1]] + inner[[3]]) - (outer[[1]] + a)
+  cy <- c(inner[[2]], inner[[2]] + inner[[4]]) - (outer[[2]] + b)
+  all(outer(cx^2 / a^2, cy^2 / b^2, `+`) <= 1)
 }

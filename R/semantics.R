@@ -93,6 +93,8 @@ shape_registry <- function() {
     "crossed-circle",         "flowChartSummingJunction",    FALSE,   FALSE,   "none",  NA,
     # polygons
     "diamond",                "diamond",                     FALSE,   FALSE,   "none",  NA,
+    # the state diagram's choice pseudo-state
+    "choice",                 "diamond",                     FALSE,   FALSE,   "none",  NA,
     "diam",                   "diamond",                     FALSE,   FALSE,   "none",  NA,
     "decision",               "diamond",                     FALSE,   FALSE,   "none",  NA,
     "question",               "diamond",                     FALSE,   FALSE,   "none",  NA,
@@ -237,8 +239,9 @@ anc_unit_kind <- function(a, node_dom_ids) {
   if (nzchar(id) && id %in% node_dom_ids) "node" else NA_character_
 }
 
+# The DOM serial tells apart sibling elements that have no id (bridge 3).
 anc_signature <- function(a) {
-  paste(a$id %||% "", a$cls %||% "", a$data$id %||% "", sep = "\u001f")
+  paste(a$n %||% "", a$id %||% "", a$cls %||% "", a$data$id %||% "", sep = "\u001f")
 }
 
 # A path is a link when it says so or sits under the edge paths group.
@@ -263,7 +266,9 @@ piece_unit <- function(i, is_path, id, data, anc, node_dom_ids) {
                 ref = NA_character_, hand_drawn = FALSE))
   }
   a <- anc[[k]]
-  below <- if (k < length(anc)) anc[[k + 1L]]$data$id else NULL
+  # The nearest element below the unit's that names an edge; an unnamed <g>
+  # (listed since bridge 3) may sit in between.
+  below <- purrr::detect(anc[seq_along(anc) > k], function(b) !is.null(b$data$id))$data$id
   ref <- as.character(a$data$id %||% below %||% NA_character_)
   # Sibling edge labels differ only in the edge id below their ancestor.
   sig <- paste(c(purrr::map_chr(anc[seq_len(k)], anc_signature), ref),
@@ -428,8 +433,11 @@ registered_item <- function(pu, reg, hand_drawn, name) {
   )
 }
 
+# Built once: the table is looked up for every node.
+.shape_registry <- shape_registry()
+
 registry_row <- function(shape) {
-  reg <- shape_registry()
+  reg <- .shape_registry
   hit <- match_key(shape, reg$shape)
   if (is.na(hit)) NULL else reg[hit, ]
 }
@@ -511,7 +519,7 @@ with_name <- function(p, name) {
 unit_blocks_edge <- function(u, pu) {
   pu$fill <- NA_character_
   pu$fill_a <- 0
-  pu$prst <- NA_character_
+  pu$prst[pu$kind != "line"] <- NA_character_
   pu$closed <- purrr::map_lgl(pu$path, function(p) !is.null(p) && path_closed(p))
   pu$name <- u$name
   new_blocks("edge", u$pos, list(to_items(pu)), start = u$start, end = u$end)
@@ -610,9 +618,9 @@ nest_level <- function(gid, gname, blocks, seen = character()) {
 }
 
 #' Scene items from pieces: units assembled by their rules, everything else
-#' by the generic ones, nested into subgraph groups
+#' by the generic ones (and grouped by scope), nested into subgraph groups
 #' @noRd
-scene_items <- function(pieces, db) {
+scene_items <- function(pieces, db, viewbox) {
   nodes <- db_node_table(db)
   edges <- db_edge_table(db)
   pu <- piece_units(pieces, nodes)
@@ -621,10 +629,11 @@ scene_items <- function(pieces, db) {
   in_unit <- !is.na(pu$key)
   by_unit <- split(pieces[in_unit, ], factor(pu$key[in_unit], levels = units$key))
   unit_rows <- split(units, seq_len(nrow(units)))
+  loose <- scope_blocks(fold_pieces(pieces[!in_unit, ]), viewbox)
   blocks <- purrr::list_rbind(c(
     list(new_blocks(character(), numeric(), list())),
     purrr::map2(unit_rows, by_unit, function(u, p) .unit_builders[[u$kind]](u, p)),
-    list(loose_blocks(fold_pieces(pieces[!in_unit, ])))
+    list(new_blocks(rep("loose", length(loose$pos)), loose$pos, loose$items))
   ))
 
   has_db <- nrow(nodes) > 0L

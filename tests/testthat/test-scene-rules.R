@@ -629,3 +629,40 @@ test_that("a fifth line across the frame stays a line beside the rect", {
   expect_equal(sum(items$kind == "shape" & items$prst %in% "rect"), 1L)
   expect_equal(sum(items$kind == "line"), 1L)
 })
+
+# -- rulings on B2 and B5 ------------------------------------------------------
+
+test_that("an outer circle and a sector with the same box stay two shapes", {
+  # ruling: a preset pairs with a custom path only when the path's end points
+  # and midpoints lie on the preset's figure (the pie's outer circle and its
+  # largest slice share a box, not a figure).
+  sector <- prim_path("M200,15 A185,185 0 1 1 15,200 L200,200 Z", bbox = c(15, 15, 370, 370),
+                      fill = "#ECECFF", stroke = "#000000", stroke_w = 2)
+  ring <- prim_ellipse(200, 200, 186, fill = NULL, stroke = "#000000", stroke_w = 2)
+  items <- generic_items(in_g(list(ring, sector), n = 5), viewBox = c(0, 0, 400, 400))
+  s <- shapes_in(items)
+  expect_equal(nrow(s), 2L)
+  expect_equal(s$prst[[1]], "ellipse")
+  expect_true(is.na(s$prst[[2]]))
+  expect_equal(s$fill[[2]], "ECECFF")
+})
+
+test_that("a stack in the corner of an ellipse's box, outside the ellipse, stays free", {
+  # ruling: a stack merges only when its union box lies inside the
+  # container's figure (for an ellipse, all four corners inside it).
+  corner <- generic_items(list(
+    prim_ellipse(100, 100, 90),
+    prim_text("Alice", x = 150, y = 15, w = 35, h = 18, anchor = "start"),
+    prim_text("Bob", x = 150, y = 35, w = 25, h = 18, anchor = "start")
+  ))
+  expect_equal(sum(corner$kind == "text"), 2L)
+  expect_identical(corner$label[corner$kind == "shape"], "")
+
+  centre <- generic_items(list(
+    prim_ellipse(100, 100, 90),
+    prim_text("Alice", x = 80, y = 80, w = 40, h = 18),
+    prim_text("Bob", x = 85, y = 100, w = 30, h = 18)
+  ))
+  expect_equal(nrow(centre), 1L)
+  expect_identical(centre$label, "Alice\nBob")
+})

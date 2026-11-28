@@ -166,12 +166,14 @@ dml_ln <- function(width, hex, alpha = 1, dash = NA, head = "none", tail = "none
   text_box = function() xml_tag("wps:cNvSpPr", txBox = TRUE)
 )
 
-#' wps:bodyPr for a text body: no wrapping, insets in EMU c(l, t, r, b),
-#' centred vertically
+.body_anchors <- c(top = "t", center = "ctr", bottom = "b")
+
+#' wps:bodyPr for a text body: no wrapping, insets in EMU c(l, t, r, b), and
+#' the vertical anchor for the scene's `valign` ("top", "center", "bottom")
 #' @noRd
-dml_body_pr <- function(insets = c(0, 0, 0, 0)) {
+dml_body_pr <- function(insets = c(0, 0, 0, 0), valign = "center") {
   xml_tag("wps:bodyPr", wrap = "none", lIns = insets[[1]], tIns = insets[[2]],
-          rIns = insets[[3]], bIns = insets[[4]], anchor = "ctr",
+          rIns = insets[[3]], bIns = insets[[4]], anchor = .body_anchors[[valign]],
           .children = xml_tag("a:normAutofit"))
 }
 

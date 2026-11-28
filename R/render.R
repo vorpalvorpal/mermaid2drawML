@@ -152,7 +152,8 @@ as_mermaid_render <- function(x) {
   structure(
     list(type = x$type, role = x$role, viewBox = view_box,
          title = x$title, desc = x$desc, svg = x$svg,
-         prims = x$prims, db = x$db, mermaid = x$mermaid),
+         prims = x$prims, markers = x$markers, db = x$db,
+         mermaid = x$mermaid),
     class = "mermaid_render"
   )
 }

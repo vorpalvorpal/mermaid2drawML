@@ -184,11 +184,11 @@ geometry_xml <- function(it, w, h, s) {
   dml_cust_geom(local, w, h)
 }
 
-# A connector cannot hold text, so an open outline that took a label stays a
-# shape.
+# A connector cannot hold text or a fill, so an open outline that took a label
+# or is filled stays a shape.
 shape_role <- function(it) {
   if (it$kind == "text") return("text_box")
-  if (isFALSE(it$closed) && is.null(it$text)) "connector" else "shape"
+  if (isFALSE(it$closed) && is.na(it$fill) && is.null(it$text)) "connector" else "shape"
 }
 
 shape_xml <- function(it, origin, ctx) {
@@ -210,7 +210,11 @@ shape_xml <- function(it, origin, ctx) {
   dml_wsp(
     it$name, shape_role(it), sp_pr,
     txbx = if (has_text) dml_txbx(it$text, ctx$style),
-    body_pr = if (has_text) dml_body_pr(emu(it$text$insets, s)) else xml_tag("wps:bodyPr")
+    body_pr = if (has_text) {
+      dml_body_pr(emu(it$text$insets, s), it$text$valign %||% "center")
+    } else {
+      xml_tag("wps:bodyPr")
+    }
   )
 }
 

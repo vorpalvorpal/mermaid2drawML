@@ -341,7 +341,7 @@ test_that("pie: each legend entry is a group of its swatch and its text", {
 
 test_that("quadrantChart: each data point is a group of its dot and its label", {
   items <- fixture_scene("quadrantChart")$items
-  g <- named_with(items[items$kind == "group", ], "mermaid:group:data-point")
+  g <- items[items$kind == "group" & grepl("^mermaid:group:data-point(#[0-9]+)?$", items$name), ]
   expect_equal(nrow(g), 3L)
   for (name in g$name) {
     kids <- subtree_rows(items, name)
