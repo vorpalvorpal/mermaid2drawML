@@ -136,7 +136,7 @@ test_that("flowchart-full: line ends follow the link markers", {
   expect_equal(ends("a", "b"), c(head = "none", tail = "triangle"))
   expect_equal(ends("a", "c"), c(head = "none", tail = "none"))
   expect_equal(ends("a", "f"), c(head = "none", tail = "oval"))
-  expect_equal(ends("a", "g"), c(head = "none", tail = "diamond"))
+  expect_equal(ends("a", "g"), c(head = "none", tail = "none"))   # step 2: C1, a cross is no Word end
   expect_equal(ends("a", "h"), c(head = "triangle", tail = "triangle"))
 })
 

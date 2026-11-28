@@ -381,7 +381,7 @@ prim_shape <- function(kind, tag, geom, bbox, m = c(1, 0, 0, 1, 0, 0),
                        stroke_a = 1, stroke_w = 1, dash = NULL,
                        marker_start = NULL, marker_end = NULL,
                        id = "", cls = "", data = list(), anc = list(),
-                       html = NULL) {
+                       html = NULL, n = NULL) {
   p <- list(
     kind = kind, tag = tag, id = id, cls = cls, data = json_obj(data),
     anc = anc, bbox = as.list(bbox), m = as.list(m), geom = geom,
@@ -393,6 +393,7 @@ prim_shape <- function(kind, tag, geom, bbox, m = c(1, 0, 0, 1, 0, 0),
     marker_start = marker_start, marker_end = marker_end
   )
   if (!is.null(html)) p$html <- html
+  if (!is.null(n)) p$n <- as.integer(n)
   p
 }
 
@@ -464,11 +465,11 @@ text_run <- function(t, bold = FALSE, italic = FALSE, underline = FALSE,
 # rows split the box height evenly.
 prim_text <- function(text = NULL, x, y, w, h, anchor = "middle", rot = 0,
                       rows = NULL, html = TRUE, anc = list(), id = "", cls = "",
-                      ...) {
+                      n = NULL, ...) {
   rows <- rows %|null|% purrr::map(text, function(t) list(text_run(t, ...)))
-  n <- length(rows)
-  rh <- h / n
-  list(
+  nr <- length(rows)
+  rh <- h / nr
+  p <- list(
     kind = "text", tag = if (html) "foreignobject" else "text",
     id = id, cls = cls, data = json_obj(), anc = anc,
     bbox = list(x, y, w, h), html = html, anchor = anchor, rot = rot,
@@ -476,18 +477,24 @@ prim_text <- function(text = NULL, x, y, w, h, anchor = "middle", rot = 0,
       list(bbox = list(x, y + (i - 1) * rh, w, rh), runs = runs)
     })
   )
+  if (!is.null(n)) p$n <- as.integer(n)
+  p
 }
 
 # A bridge success object holding `prims`, through the validating constructor.
+# `markers`: a named list of marker_def()s, keyed by marker id (bridge 3).
 mini_render <- function(prims = list(), viewBox = c(0, 0, 200, 100), db = NULL,
-                        type = "flowchart-v2", title = NULL, desc = NULL) {
+                        type = "flowchart-v2", title = NULL, desc = NULL,
+                        markers = NULL) {
   prims <- purrr::imap(unname(prims), function(p, i) c(list(i = i - 1L), p))
   raw <- list(
-    ok = TRUE, bridge = 2L, mermaid = "11.13.0", type = type, role = type,
+    ok = TRUE, bridge = if (is.null(markers)) 2L else 3L, mermaid = "11.13.0",
+    type = type, role = type,
     viewBox = as.list(viewBox), title = title, desc = desc,
     svg = "<svg xmlns=\"http://www.w3.org/2000/svg\"/>",
     prims = prims, db = db
   )
+  if (!is.null(markers)) raw$markers <- markers
   json <- jsonlite::toJSON(raw, auto_unbox = TRUE, null = "null", digits = NA)
   as_mermaid_render(jsonlite::fromJSON(json, simplifyVector = FALSE))
 }
@@ -541,6 +548,134 @@ prim_edge <- function(d, edge_id, marker_end = "flowchart-v2-pointEnd", ...) {
   prim_path(d, id = edge_id, data = list(edge = "true", et = "edge", id = edge_id),
             anc = anc_edge(), fill = NULL, stroke = "#333333",
             marker_end = marker_end, ...)
+}
+
+# -- Step 2: DOM serials (A2) and marker definitions (A1) ----------------------
+
+# One `anc` entry with its DOM serial `n` (an unnamed <g> has id and cls "").
+anc_g <- function(n, cls = "", id = "", data = NULL) {
+  a <- list(id = id, cls = cls, n = as.integer(n))
+  if (!is.null(data)) a$data <- data
+  a
+}
+
+# Wrap prims in one <g> with serial `n`: its entry goes first in each prim's
+# `anc` (outermost first), so in_g(in_g(ps, 3), 2) puts ps in g 3 inside g 2.
+in_g <- function(prims, n, cls = "", id = "", data = NULL) {
+  g <- anc_g(n, cls = cls, id = id, data = data)
+  purrr::map(prims, function(p) {
+    p$anc <- c(list(g), p$anc %|null|% list())
+    p
+  })
+}
+
+# Give each prim its own element serial `n`, from `from` in list order.
+with_n <- function(prims, from = 1000L) {
+  purrr::imap(unname(prims), function(p, i) {
+    p$n <- as.integer(from + i - 1L)
+    p
+  })
+}
+
+# A marker's drawn child as the bridge reports it (A1): shape fields only, `m`
+# and `bbox` in marker content coordinates, no i, id, anc, data or markers.
+marker_prim <- function(p) {
+  p[setdiff(names(p), c("i", "id", "anc", "data", "marker_start", "marker_end",
+                        "html", "n"))]
+}
+
+# One entry of `render$markers` (A1). `prims` are prim_*() shapes in content
+# coordinates; `viewBox` NULL for none.
+marker_def <- function(viewBox = NULL, refX = 0, refY = 0, w = 3, h = 3,
+                       units = "strokeWidth", orient = "auto", prims = list()) {
+  list(viewBox = if (is.null(viewBox)) NULL else as.list(viewBox),
+       refX = refX, refY = refY, w = w, h = h, units = units, orient = orient,
+       prims = purrr::map(prims, marker_prim))
+}
+
+# Mermaid 11's own markers (from the survey SVGs), with their computed paint.
+
+# flowchart-v2-pointEnd: a filled arrow point, tip at content x = 10.
+marker_arrow_point <- function(fill = "#333333", stroke = "#333333",
+                               w = 8, h = w, refX = 5, units = "userSpaceOnUse",
+                               orient = "auto") {
+  marker_def(c(0, 0, 10, 10), refX = refX, refY = 5, w = w, h = h, units = units,
+             orient = orient,
+             prims = list(prim_path("M 0 0 L 10 5 L 0 10 z", fill = fill,
+                                    stroke = stroke, stroke_w = 1)))
+}
+
+# flowchart-v2-pointStart: the point turned round, orient auto.
+marker_arrow_point_start <- function() {
+  marker_def(c(0, 0, 10, 10), refX = 4.5, refY = 5, w = 8, h = 8,
+             units = "userSpaceOnUse", orient = "auto",
+             prims = list(prim_path("M 0 5 L 10 10 L 10 0 z", fill = "#333333",
+                                    stroke = "#333333", stroke_w = 1)))
+}
+
+# flowchart-v2-circleEnd: a filled circle, refX beyond the content.
+marker_circle_end <- function() {
+  marker_def(c(0, 0, 10, 10), refX = 11, refY = 5, w = 11, h = 11,
+             units = "userSpaceOnUse", orient = "auto",
+             prims = list(prim_ellipse(5, 5, 5, fill = "#333333", stroke = "#333333")))
+}
+
+# flowchart-v2-crossEnd: two stroked strokes, no fill.
+marker_cross_end <- function() {
+  marker_def(c(0, 0, 11, 11), refX = 12, refY = 5.2, w = 11, h = 11,
+             units = "userSpaceOnUse", orient = "auto",
+             prims = list(prim_path("M 1,1 l 9,9 M 10,1 l -9,9", bbox = c(1, 1, 9, 9),
+                                    fill = NULL, stroke = "#333333", stroke_w = 2)))
+}
+
+# class-extensionEnd: a hollow triangle, no viewBox, strokeWidth units;
+# refX 1 (the base) sits on the path end and the tip points beyond it.
+marker_extension_end <- function(orient = "auto", fill = NULL, stroke = "#333333") {
+  marker_def(NULL, refX = 1, refY = 7, w = 20, h = 28, units = "strokeWidth",
+             orient = orient,
+             prims = list(prim_path("M 1,1 V 13 L18,7 Z", bbox = c(1, 1, 17, 12),
+                                    fill = fill, stroke = stroke, stroke_w = 1)))
+}
+
+# class-extensionStart: the same triangle drawn turned round, refX 18, for a
+# start with plain orient auto (190 x 240 is Mermaid's own clip box).
+marker_extension_start <- function() {
+  marker_def(NULL, refX = 18, refY = 7, w = 190, h = 240, units = "strokeWidth",
+             orient = "auto",
+             prims = list(prim_path("M 1,7 L18,13 V 1 Z", bbox = c(1, 1, 17, 12),
+                                    fill = NULL, stroke = "#333333", stroke_w = 1)))
+}
+
+# class-compositionStart: a filled diamond, content x 1..18, refX 18.
+marker_composition_start <- function() {
+  marker_def(NULL, refX = 18, refY = 7, w = 190, h = 240, units = "strokeWidth",
+             orient = "auto",
+             prims = list(prim_path("M 18,7 L9,13 L1,7 L9,1 Z", bbox = c(1, 1, 17, 12),
+                                    fill = "#333333", stroke = "#333333", stroke_w = 1)))
+}
+
+# sequencenumber: one filled circle, centred on (refX, refY).
+marker_seq_number <- function() {
+  marker_def(NULL, refX = 15, refY = 15, w = 60, h = 40, units = "strokeWidth",
+             orient = "auto",
+             prims = list(prim_ellipse(15, 15, 6, fill = "#333333", stroke = NULL)))
+}
+
+# er-oneOrMoreEnd: a crow's foot, one stroked open path (a bar and a lens).
+marker_er_one_or_more_end <- function() {
+  marker_def(NULL, refX = 27, refY = 18, w = 45, h = 36, units = "strokeWidth",
+             orient = "auto",
+             prims = list(prim_path("M3,9 L3,27 M9,18 Q27,0 45,18 Q27,36 9,18",
+                                    bbox = c(3, 9, 42, 18), fill = NULL,
+                                    stroke = "#333333", stroke_w = 1)))
+}
+
+# er-onlyOneStart: two bars, one stroked open path.
+marker_er_only_one_start <- function() {
+  marker_def(NULL, refX = 0, refY = 9, w = 18, h = 18, units = "strokeWidth",
+             orient = "auto",
+             prims = list(prim_path("M9,0 L9,18 M15,0 L15,18", fill = NULL,
+                                    stroke = "#333333", stroke_w = 1)))
 }
 
 # A one-prim node unit (shape prim + centred label) for a db shape test.

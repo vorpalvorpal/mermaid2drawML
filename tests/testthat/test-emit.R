@@ -533,7 +533,9 @@ test_that("flowchart-paint XML: one edge shape per drawn link, styled from the p
     expect_equal(ln$color, "333333", info = nm)
     expect_equal(shape_fill(e)$kind, "none", info = nm)
     expect_equal(ln$tail, "triangle", info = nm)
-    expect_equal(c(ln$tail_w, ln$tail_len), c("med", "med"), info = nm)
+    # step 2: C2, the 8 px flowchart point is "lg" on a 1 px edge, "sm" at 3.5 px
+    size <- if (identical(nm, "mermaid:edge:E-C")) "sm" else "lg"
+    expect_equal(c(ln$tail_w, ln$tail_len), c(size, size), info = nm)
     expect_true(shape_is_custom(e), info = nm)
     expect_false(is_missing_node(xfirst(e, "./wps:cNvCnPr")), info = nm)
   }
@@ -647,11 +649,13 @@ test_that("sequenceDiagram: participant boxes hold their names; messages have li
     expect_true(all(boxes$prst == "roundRect"), info = who)
   }
   msgs <- items[items$kind == "line" & items$tail != "none", ]
-  expect_gte(nrow(msgs), 8L)
-  expect_true(all(c("triangle", "diamond") %in% msgs$tail))   # arrowhead, crosshead
+  # step 2: C1, filled-head is stealth and crosshead no Word end (a shape)
+  expect_gte(nrow(msgs), 7L)
+  expect_true(all(c("triangle", "stealth") %in% msgs$tail))   # arrowhead, filled-head
+  expect_false("diamond" %in% msgs$tail)
   doc <- fixture_doc("sequenceDiagram")
   tails <- xfind(doc, "//a:ln/a:tailEnd[@type='triangle']")
-  expect_gte(length(tails), 7L)
+  expect_gte(length(tails), 6L)
 })
 
 test_that("gantt: task bars are shapes with their label merged or as text beside them", {

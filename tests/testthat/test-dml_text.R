@@ -325,7 +325,9 @@ test_that("off-centre merged text: insets are the gaps to the shape, alignment f
   box <- the_text_box(doc)
   bp <- body_pr(box)
   ins <- as.numeric(bp[c("lIns", "tIns", "rIns", "bIns")])
-  expect_near(ins, c(10, 5, 130, 75) * 9525, tol = 2)
+  # step 2: B6, one inset per axis (left, top), anchored at the top
+  expect_near(ins, c(10, 5, 0, 0) * 9525, tol = 2)
+  expect_equal(bp[["anchor"]], "t")
   expect_equal(bp[["wrap"]], "none")
   expect_equal(paragraph_jc(shape_paragraphs(box)[[1]]), "left")
 })
@@ -336,7 +338,7 @@ test_that("a gap that is negative is clamped to a zero inset", {
                           prim_text("most", x = 50, y = 10, w = 60, h = 20, anchor = "end")))
   bp <- body_pr(the_text_box(doc))
   expect_equal(as.numeric(bp[["rIns"]]), 0)
-  expect_near(as.numeric(bp[["lIns"]]), 50 * 9525, tol = 2)
+  expect_equal(as.numeric(bp[["lIns"]]), 0)   # step 2: B6, only the right inset, clamped
   expect_equal(paragraph_jc(shape_paragraphs(the_text_box(doc))[[1]]), "right")
 })
 
@@ -345,9 +347,12 @@ test_that("flowchart-paint: the subgraph title sits at the top of its background
   expect_equal(shape_paragraph_texts(bg), "Group one")
   bp <- body_pr(bg)
   # cluster 189.203, 112 (232.273 x 280.672); title 268.262, 114 (74.156 x 19)
+  # step 2: B6, centred across (no side insets), at the top (top inset only)
   expect_near(as.numeric(bp[["tIns"]]), 2 * 9525, tol = 2)
-  expect_near(as.numeric(bp[["lIns"]]), (268.262 - 189.203) * 9525, tol = 2)
-  expect_near(as.numeric(bp[["bIns"]]), (392.672 - 133) * 9525, tol = 2)
+  expect_equal(as.numeric(bp[["lIns"]]), 0)
+  expect_equal(as.numeric(bp[["rIns"]]), 0)
+  expect_equal(as.numeric(bp[["bIns"]]), 0)
+  expect_equal(bp[["anchor"]], "t")
 })
 
 test_that("node labels centred in their shapes have zero insets (flowchart-paint)", {

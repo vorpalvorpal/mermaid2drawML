@@ -240,23 +240,25 @@ test_that("a path or line without markers has no ends", {
 })
 
 test_that("line_end_kind() maps each documented marker id pattern", {
+  # step 2: C1 corrected the table; with no marker definition (as here) an
+  # end drawn as a shape falls back to its nearest filled Word end.
   expected <- c(
     "flowchart-v2-pointEnd" = "triangle",
     "flowchart-v2-pointStart" = "triangle",
     "flowchart-v2-pointEnd__f00" = "triangle",
     "block-pointEnd" = "triangle",
     "arrowhead" = "triangle",
-    "filled-head" = "triangle",
-    "stateDiagram-barbEnd" = "triangle",
+    "filled-head" = "stealth",                     # step 2: C1
+    "stateDiagram-barbEnd" = "stealth",            # step 2: C1
     "class-extensionEnd" = "triangle",
     "class-extensionStart" = "triangle",
-    "requirement-requirement_arrowEnd" = "triangle",
+    "requirement-requirement_arrowEnd" = "arrow",  # step 2: C1
     "class-dependencyEnd" = "arrow",
     "my-stickEnd" = "arrow",
     "flowchart-v2-circleEnd" = "oval",
     "class-lollipopStart" = "oval",
-    "flowchart-v2-crossEnd" = "diamond",
-    "crosshead" = "diamond",
+    "flowchart-v2-crossEnd" = "none",              # step 2: C1 (no X end in Word)
+    "crosshead" = "none",                          # step 2: C1
     "class-aggregationStart" = "diamond",
     "class-compositionStart" = "diamond",
     "sequencenumber" = "none",
