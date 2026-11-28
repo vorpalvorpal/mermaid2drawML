@@ -33,19 +33,6 @@ box_gap2 <- function(a, b) {
   sqrt(dx^2 + dy^2)
 }
 
-# The outline of a box as Mermaid draws its rough stroke: straight cubics.
-rough_rect <- function(x, y, w, h, ...) {
-  r <- x + w
-  b <- y + h
-  d <- sprintf(paste("M%s,%s C%s,%s %s,%s %s,%s C%s,%s %s,%s %s,%s",
-                     "C%s,%s %s,%s %s,%s C%s,%s %s,%s %s,%s"),
-               x, y, x + w / 3, y, x + 2 * w / 3, y, r, y,
-               r, y + h / 3, r, y + 2 * h / 3, r, b,
-               r - w / 3, b, r - 2 * w / 3, b, x, b,
-               x, b - h / 3, x, b - 2 * h / 3, x, y)
-  prim_path(d, bbox = c(x, y, w, h), ...)
-}
-
 # Mermaid's class divider: two straight cubic subpaths of zero height,
 # filled and stroked as the box is.
 mermaid_divider <- function(x0, x1, y, fill = "#ECECFF", stroke = "#9370DB", ...) {

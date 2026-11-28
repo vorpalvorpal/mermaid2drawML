@@ -463,11 +463,15 @@ test_that("unsupported prims raise one warning naming what was left out", {
   expect_match(seen$msg, "use", fixed = TRUE)
 })
 
-test_that("flowchart-full warns that its image was left out", {
-  expect_warning(
-    withCallingHandlers(build_diagram_xml(fixture_render("flowchart-full")),
-                        mermaid2drawml_small_text = function(c) rlang::cnd_muffle(c)),
-    class = "mermaid2drawml_unsupported")
+test_that("flowchart-full warns that its image was left out only when pictures are off", {
+  # The bridge read the picture, so it is drawn; embed_images = FALSE leaves
+  # it out with the warning.
+  build <- function(...) {
+    withCallingHandlers(build_diagram_xml(fixture_render("flowchart-full"), ...),
+                        mermaid2drawml_small_text = function(c) rlang::cnd_muffle(c))
+  }
+  expect_no_warning(build())
+  expect_warning(build(embed_images = FALSE), class = "mermaid2drawml_unsupported")
 })
 
 test_that("a diagram with nothing unsupported does not warn", {

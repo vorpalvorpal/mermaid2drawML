@@ -292,18 +292,18 @@ test_that("rotated text carries its rotation", {
   expect_equal(unlist(items[1, c("x", "y", "w", "h")]), c(x = 10, y = 40, w = 60, h = 20))
 })
 
-test_that("image and other prims are not drawn but listed as unsupported", {
+test_that("an image without a picture and other prims are not drawn but listed as unsupported", {
   sc <- build_scene(generic_render(list(
     prim_rect(0, 0, 50, 50),
-    prim_image(60, 0, 30, 30),
+    prim_image(60, 0, 30, 30, png = NULL),
     prim_other("use", 100, 0, 20, 20)
   )))
   expect_equal(nrow(sc$items), 1L)
   expect_true(all(c("image", "use") %in% sc$unsupported))
 })
 
-test_that("flowchart-full lists its image as unsupported; flowchart-paint has none", {
-  expect_true("image" %in% fixture_scene("flowchart-full")$unsupported)
+test_that("flowchart-full draws its image (the bridge read its picture); flowchart-paint has none", {
+  expect_false("image" %in% fixture_scene("flowchart-full")$unsupported)
   expect_length(fixture_scene("flowchart-paint")$unsupported, 0L)
 })
 
