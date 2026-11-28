@@ -1,3 +1,4 @@
 tests/testthat/_problems/
 .DS_Store
 .Rproj.user
+tests/testthat/testthat-problems.rds
