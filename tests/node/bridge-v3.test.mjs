@@ -75,11 +75,12 @@ describe('bridge contract 3', { skip: skipReason }, () => {
       write('flow', FLOW), write('cls', CLASS), write('er', ER),
       write('seq', SEQ), write('nomark', NOMARK), write('tl', TIMELINE),
     ];
-    [flow, cls, er, seq, nomark, tl] = parseOut(runBridge(files));
+    // --svg: svg is opt-in from bridge 4, and A3 reads the timelines' svg.
+    [flow, cls, er, seq, nomark, tl] = parseOut(runBridge(['--svg', ...files]));
 
     const cfg = path.join(tmp, 'neutral.json');
     fs.writeFileSync(cfg, JSON.stringify(NEUTRAL_CFG));
-    [tlNeutral] = parseOut(runBridge(['--config', cfg, files[5]]));
+    [tlNeutral] = parseOut(runBridge(['--svg', '--config', cfg, files[5]]));
   });
   after(() => { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); });
 

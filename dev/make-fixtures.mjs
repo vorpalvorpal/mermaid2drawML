@@ -4,7 +4,11 @@
 // .mmd, holding that diagram's bridge result without its `svg` field.
 //
 // Usage (from the package root):
-//   node dev/make-fixtures.mjs [--config <config.json>]
+//   node dev/make-fixtures.mjs [--out <dir>] [--config <config.json>]
+//
+// --out <dir> reads the .mmd files in <dir> and writes the .json files there
+// instead (to compare a bridge change with the committed fixtures). Other
+// arguments go to the bridge.
 //
 // M2D_NODE_DIR defaults to the R user data directory that
 // setup_mermaid2drawml() installs into; on macOS PUPPETEER_EXECUTABLE_PATH
@@ -49,10 +53,23 @@ const format = (res) => `{\n${Object.entries(res)
 
 const withoutSvg = ({ svg, ...rest }) => rest;
 
+// --out <dir> (or --out=<dir>) is ours; the rest is for the bridge.
+const splitArgs = (args, acc = { dir: fixtures, bridgeArgs: [] }) => {
+  if (args.length === 0) return acc;
+  const [a, ...rest] = args;
+  if (a === '--out') {
+    if (rest.length === 0) throw new Error('--out needs a directory');
+    return splitArgs(rest.slice(1), { ...acc, dir: path.resolve(rest[0]) });
+  }
+  if (a.startsWith('--out=')) return splitArgs(rest, { ...acc, dir: path.resolve(a.slice(6)) });
+  return splitArgs(rest, { ...acc, bridgeArgs: [...acc.bridgeArgs, a] });
+};
+
 const main = (argv) => {
-  const names = fs.readdirSync(fixtures).filter((f) => f.endsWith('.mmd')).sort();
-  if (names.length === 0) throw new Error(`no .mmd files in ${fixtures}`);
-  const r = spawnSync(process.execPath, [bridge, ...argv, ...names.map((n) => path.join(fixtures, n))], {
+  const { dir, bridgeArgs } = splitArgs(argv);
+  const names = fs.readdirSync(dir).filter((f) => f.endsWith('.mmd')).sort();
+  if (names.length === 0) throw new Error(`no .mmd files in ${dir}`);
+  const r = spawnSync(process.execPath, [bridge, ...bridgeArgs, ...names.map((n) => path.join(dir, n))], {
     env: childEnv, encoding: 'utf8', maxBuffer: 1024 * 1024 * 1024, stdio: ['ignore', 'pipe', 'inherit'],
   });
   if (r.status !== 0) throw new Error(`bridge exited ${r.status}${r.error ? `: ${r.error.message}` : ''}`);
@@ -61,7 +78,7 @@ const main = (argv) => {
   const failed = names.flatMap((name, i) => {
     const res = results[i];
     if (!res.ok) return [`${name}: ${res.error.message.split('\n')[0]}`];
-    const out = path.join(fixtures, name.replace(/\.mmd$/, '.json'));
+    const out = path.join(dir, name.replace(/\.mmd$/, '.json'));
     fs.writeFileSync(out, format(withoutSvg(res)));
     process.stderr.write(`wrote ${path.relative(root, out)} (${res.prims.length} prims)\n`);
     return [];

@@ -437,11 +437,11 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     it('reports an image node as an image prim with PNG data, bbox and m', () => {
       const img = imgNode.prims.find((p) => p.kind === 'image');
       assert.ok(img, 'image prim');
-      // NB: every prim already has `data` = its data-* attributes (an object);
-      // the spec reuses the name for an image prim's picture.
-      assert.equal(typeof img.data, 'string', `image prim data is ${JSON.stringify(img.data)}`);
-      assert.match(img.data, /^data:image\/png;base64,/);
-      const { sig, w, h } = pngSize(img.data);
+      // The picture is `png` (ruling B1): every prim already has `data` for
+      // its data-* attributes.
+      assert.equal(typeof img.png, 'string', `image prim png is ${JSON.stringify(img.png)}`);
+      assert.match(img.png, /^data:image\/png;base64,/);
+      const { sig, w, h } = pngSize(img.png);
       assert.deepEqual(sig, PNG_SIG);
       assert.deepEqual([w, h], [2, 2], 'drawn at natural size');
       assert.ok(img.bbox.length === 4 && img.bbox.every(isNum));
@@ -457,14 +457,14 @@ describe('bridge contract 4', { skip: skipReason }, () => {
         assert.ok(p.m.length === 6 && p.m.every(isNum));
       }
     });
-    it('gives data: null for a broken <img> link without failing the diagram', () => {
+    it('gives png: null for a broken <img> link without failing the diagram', () => {
       assert.equal(imgHtml.ok, true);
       const imgs = imgHtml.prims.filter((p) => p.kind === 'image');
-      assert.equal(imgs.filter((p) => p.data === null).length, 1, JSON.stringify(imgs.map((p) => p.data)));
-      const good = imgs.filter((p) => typeof p.data === 'string');
+      assert.equal(imgs.filter((p) => p.png === null).length, 1, JSON.stringify(imgs.map((p) => p.png)));
+      const good = imgs.filter((p) => typeof p.png === 'string');
       assert.equal(good.length, 1);
-      assert.match(good[0].data, /^data:image\/png;base64,/);
-      assert.deepEqual(pngSize(good[0].data).sig, PNG_SIG);
+      assert.match(good[0].png, /^data:image\/png;base64,/);
+      assert.deepEqual(pngSize(good[0].png).sig, PNG_SIG);
     });
     it('guard: an image node with a broken URL fails inside Mermaid, as a result not a crash', () => {
       assert.equal(imgNodeBroken.ok, false);

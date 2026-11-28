@@ -92,8 +92,8 @@ describe('mermaid bridge', { skip: skipReason }, () => {
     badArgsNoInputs = runBridge([]);
     badArgsMissing = runBridge([path.join(tmp, 'does-not-exist.mmd')]);
 
-    // One launch for all the samples.
-    const r = runBridge(order.map((k) => files[k]));
+    // One launch for all the samples (--svg: svg is opt-in from bridge 4).
+    const r = runBridge(['--svg', ...order.map((k) => files[k])]);
     results = { raw: r, stdout: r.stdout, status: r.status, stderr: r.stderr };
     const out = parseOut(r);
     results.out = out;
