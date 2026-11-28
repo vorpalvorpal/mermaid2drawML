@@ -48,6 +48,10 @@ const STATE = `stateDiagram-v2
   [*] --> One
   One --> Two : go
   Two --> [*]
+  state Outer {
+    [*] --> In
+  }
+  Two --> Outer
 `;
 const ER = `erDiagram
   CUSTOMER ||--o{ ORDER : places
@@ -322,6 +326,16 @@ describe('bridge contract 4', { skip: skipReason }, () => {
       assert.equal(unitOf(textPrim(state, 'One'), 'node').id, 'One');
       const e = state.db.edges.find((x) => x.label === 'go');
       assert.equal(unitOf(textPrim(state, 'go'), 'edge_label').id, e.id);
+    });
+    it('state: a composite state is a subgraph unit', () => {
+      // A composite state's element carries the state's id, not its domId.
+      assert.deepEqual(ids(unitsOfKind(state, 'subgraph')), sortedIds(dbGroups(state)));
+      assert.ok(ids(unitsOfKind(state, 'subgraph')).includes('Outer'));
+      // Mermaid draws the inner states beside the composite's element, not
+      // inside it: which composite holds a state is the db's parentId.
+      assert.equal(unitOf(textPrim(state, 'In'), 'node').id, 'In');
+      assert.equal(state.db.nodes.find((n) => n.id === 'In').parentId, 'Outer');
+      assert.equal(unitOf(textPrim(state, 'Outer'), 'subgraph').id, 'Outer');
     });
     it('ER: node units for each entity, edge units for relationships, label unit', () => {
       assert.deepEqual(ids(unitsOfKind(er, 'node')), sortedIds(dbNodes(er)));

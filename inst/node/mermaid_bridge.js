@@ -555,8 +555,11 @@ async function pageMain({ code, config, svgId, zen, packs, wantSvg }) {
     if (!db) return () => null;
     const str = (x) => (x === null || x === undefined ? '' : String(x));
     const nodeUnit = (n) => ({ kind: n.isGroup ? 'subgraph' : 'node', id: str(n.id) });
+    // An element is a node's when its id is the node's domId or the node's
+    // id: a composite state has a domId, yet its element carries the id. The
+    // domId entries come last so that they win where the two collide.
     const nodes = new Map([
-      ...db.nodes.filter((n) => !str(n.domId) && str(n.id)).map((n) => [str(n.id), nodeUnit(n)]),
+      ...db.nodes.filter((n) => str(n.id)).map((n) => [str(n.id), nodeUnit(n)]),
       ...db.nodes.filter((n) => str(n.domId)).map((n) => [str(n.domId), nodeUnit(n)]),
     ]);
     const edges = new Map(db.edges.filter((e) => str(e.id))
