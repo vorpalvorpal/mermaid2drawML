@@ -11,7 +11,10 @@ Invisibly, \code{TRUE}. Raises an error of class \code{mermaid2drawml_setup}
 when something is missing or out of date.
 }
 \description{
-Verifies that Node.js is available and that the installed Node packages are
-the versions pinned by this version of mermaid2drawml. Rendering functions
-call it for you; a passing check is remembered for the session.
+Verifies that Node.js is available and that the installed Node packages
+(Mermaid, mermaid-cli and the Font Awesome icon packs; see
+\code{\link[=setup_mermaid2drawml]{setup_mermaid2drawml()}}) are the versions pinned by this version of
+mermaid2drawml, which is not the case after an update of the R package
+until \code{\link[=setup_mermaid2drawml]{setup_mermaid2drawml()}} is run again. Rendering functions call it
+for you; a passing check is remembered for the session.
 }

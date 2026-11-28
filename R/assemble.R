@@ -90,8 +90,7 @@ group_under <- function(items, name) {
 #' The box of drawn rows (not groups)
 #' @noRd
 drawn_box <- function(items) {
-  d <- items$kind != "group"
-  union_box(items$x[d], items$y[d], items$w[d], items$h[d])
+  union_box(box_matrix(items)[items$kind != "group", , drop = FALSE])
 }
 
 # Blocks of items one after another (NULL entries allowed).
@@ -184,7 +183,8 @@ scope_chains <- function(p) {
 #' @noRd
 grouped_scopes <- function(p, sc, all_box) {
   lim <- .scope_group_limits
-  boxes <- purrr::map(sc$members, function(m) union_box(p$x[m], p$y[m], p$w[m], p$h[m]))
+  b <- box_matrix(p)
+  boxes <- purrr::map(sc$members, function(m) union_box(b[m, , drop = FALSE]))
   whole <- purrr::map_lgl(boxes, function(b) {
     b[[3]] >= lim$whole * all_box[[3]] && b[[4]] >= lim$whole * all_box[[4]]
   })
@@ -216,14 +216,14 @@ scope_group_names <- function(p, serials) {
 #' Loose pieces as blocks: each item that no scope group holds, and each
 #' outermost scope group with everything in it
 #'
-#' @param all_box The union box of every item of the diagram.
+#' @param ctx The diagram's block context (see scene_items()).
 #' @return list(pos, items), one entry per block.
 #' @noRd
-scope_blocks <- function(p, markers, all_box) {
+scope_blocks <- function(p, ctx) {
   if (nrow(p) == 0L) return(list(pos = numeric(), items = list()))
-  entries <- piece_entries(to_items(p), p, markers)
+  entries <- piece_entries(to_items(p), p, ctx$markers)
   sc <- scope_chains(p)
-  made <- grouped_scopes(p, sc, all_box)
+  made <- grouped_scopes(p, sc, ctx$all_box)
   if (!any(made)) return(list(pos = p$pos, items = entries))
 
   deepest_made <- function(at) {
@@ -283,12 +283,12 @@ name_unit <- function(items, name) {
 
 # Loose pieces (folded) as blocks: each piece a block of its own, except
 # icons and pictures, which are grouped by the scope rule.
-loose_blocks <- function(folded, markers, all_box, member_of = NA_character_) {
+loose_blocks <- function(folded, ctx, member_of = NA_character_) {
   apart <- drawn_apart(folded)
   own <- folded[!apart, ]
-  beside <- scope_blocks(folded[apart, ], markers, all_box)
+  beside <- scope_blocks(folded[apart, ], ctx)
   new_blocks("loose", c(own$pos, beside$pos),
-             c(piece_entries(to_items(own), own, markers), beside$items),
+             c(piece_entries(to_items(own), own, ctx$markers), beside$items),
              member_of = member_of)
 }
 
@@ -298,12 +298,12 @@ loose_blocks <- function(folded, markers, all_box, member_of = NA_character_) {
 #' @param lead Items standing for the unit's other pieces (a registered
 #'   shape), placed at `lead_pos`; NULL to take every piece of `p`.
 #' @noRd
-unit_items <- function(p, markers, all_box, lead = NULL, lead_pos = NA_real_) {
+unit_items <- function(p, ctx, lead = NULL, lead_pos = NA_real_) {
   apart <- drawn_apart(p)
   own <- p[!apart, ]
-  entries <- if (is.null(lead)) piece_entries(to_items(own), own, markers) else list(lead)
+  entries <- if (is.null(lead)) piece_entries(to_items(own), own, ctx$markers) else list(lead)
   pos <- if (is.null(lead)) own$pos else lead_pos
-  beside <- scope_blocks(p[apart, ], markers, all_box)
+  beside <- scope_blocks(p[apart, ], ctx)
   blocks <- c(entries, beside$items)
   stack_items(blocks[order(c(pos, beside$pos))])
 }
@@ -331,15 +331,14 @@ registered_for <- function(u, pu) {
   if (!is.null(reg) && any(outline_pieces(pu))) reg
 }
 
-unit_blocks_node <- function(u, pu, markers, all_box) {
-  pu <- name_icons(pu, icon_tag(u))
+unit_blocks_node <- function(u, pu, ctx) {
   reg <- registered_for(u, pu)
   items <- if (!is.null(reg)) {
     shape <- registered_item(pu, reg, u$hand_drawn, u$name)
     lead_pos <- min(pu$pos[!drawn_apart(pu)])
-    name_unit(unit_items(pu, markers, all_box, lead = shape, lead_pos = lead_pos), u$name)
+    name_unit(unit_items(pu, ctx, lead = shape, lead_pos = lead_pos), u$name)
   } else {
-    name_unit(unit_items(fold_pieces(pu), markers, all_box), u$name)
+    name_unit(unit_items(fold_pieces(pu), ctx), u$name)
   }
   new_blocks("node", u$pos, list(items), parent = u$parent)
 }
@@ -347,19 +346,18 @@ unit_blocks_node <- function(u, pu, markers, all_box) {
 # A subgraph block holds only its background, so that its other parts (a
 # title with no rect behind it, a state's inner box) take their paint order
 # among the subgraph's members.
-unit_blocks_subgraph <- function(u, pu, markers, all_box) {
-  pu <- name_icons(pu, icon_tag(u))
+unit_blocks_subgraph <- function(u, pu, ctx) {
   reg <- registered_for(u, pu)
   bg_name <- mermaid_name("subgraph_bg", u$id)
   if (!is.null(reg)) {
     bg <- registered_item(pu, reg, u$hand_drawn, bg_name)
-    rest <- loose_blocks(pu[drawn_apart(pu), ], markers, all_box, member_of = u$id)
+    rest <- loose_blocks(pu[drawn_apart(pu), ], ctx, member_of = u$id)
   } else {
     folded <- fold_pieces(pu)
     first_shape <- match(TRUE, folded$kind == "shape" & !drawn_apart(folded))
     bg <- if (is.na(first_shape)) empty_items() else name_unit(to_items(folded[first_shape, ]), bg_name)
-    rest <- loose_blocks(if (is.na(first_shape)) folded else folded[-first_shape, ], markers,
-                         all_box, member_of = u$id)
+    rest <- loose_blocks(if (is.na(first_shape)) folded else folded[-first_shape, ], ctx,
+                         member_of = u$id)
   }
   purrr::list_rbind(list(
     new_blocks("subgraph", u$pos, list(bg), gid = u$id, parent = u$parent),
@@ -368,20 +366,18 @@ unit_blocks_subgraph <- function(u, pu, markers, all_box) {
 }
 
 # Edges are never filled and keep their exact path, even a rectangular one.
-unit_blocks_edge <- function(u, pu, markers, all_box) {
+unit_blocks_edge <- function(u, pu, ctx) {
   pu$fill <- NA_character_
   pu$fill_a <- 0
   pu$fill_grad <- list(NULL)
   pu$prst[pu$kind != "line"] <- NA_character_
   pu$closed <- purrr::map_lgl(pu$path, function(p) !is.null(p) && path_closed(p))
-  pu$name <- u$name
-  pu <- name_icons(pu, icon_tag(u))
-  new_blocks("edge", u$pos, list(unit_items(pu, markers, all_box)), start = u$start, end = u$end)
+  pu$name[!pu$inline] <- u$name
+  new_blocks("edge", u$pos, list(unit_items(pu, ctx)), start = u$start, end = u$end)
 }
 
-unit_blocks_edge_label <- function(u, pu, markers, all_box) {
-  pu <- name_icons(pu, icon_tag(u))
-  items <- name_unit(unit_items(fold_pieces(pu), markers, all_box), u$name)
+unit_blocks_edge_label <- function(u, pu, ctx) {
+  items <- name_unit(unit_items(fold_pieces(pu), ctx), u$name)
   new_blocks("edge_label", u$pos, list(items), start = u$start, end = u$end)
 }
 
@@ -482,14 +478,17 @@ scene_items <- function(pieces, markers, db) {
   in_unit <- !is.na(pu$key)
   unit_rows <- split(which(in_unit), factor(pu$key[in_unit], levels = units$key))
   by_unit <- vctrs::vec_chop(pieces, indices = unname(unit_rows))
-  all_box <- union_box(c(pieces$x, markers$x), c(pieces$y, markers$y),
-                       c(pieces$w, markers$w), c(pieces$h, markers$h))
+  # What every block builder needs of the whole diagram: the marker shapes
+  # (to join their strokes) and the box of everything drawn (a scope as
+  # large as the drawing makes no group).
+  ctx <- list(markers = markers,
+              all_box = union_box(rbind(box_matrix(pieces), box_matrix(markers))))
   loose_pieces <- name_icons(pieces[!in_unit, ], "icon")
-  loose <- scope_blocks(fold_pieces(loose_pieces), markers, all_box)
+  loose <- scope_blocks(fold_pieces(loose_pieces), ctx)
   blocks <- purrr::list_rbind(c(
     list(new_blocks(character(), numeric(), list())),
     purrr::map2(vctrs::vec_chop(units), by_unit, function(u, p) {
-      .unit_builders[[u$kind]](u, p, markers, all_box)
+      .unit_builders[[u$kind]](u, name_icons(p, icon_tag(u)), ctx)
     }),
     list(new_blocks("loose", loose$pos, loose$items))
   ))

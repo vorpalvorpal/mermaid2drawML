@@ -9,10 +9,10 @@
 #   - a Word end is moved along the path by the signed tip offset, so that
 #     it sits where Mermaid's marker was, and sized from the marker;
 #   - a marker Word cannot draw (no end of that figure, or a round or
-#     diamond end bigger than Word's largest) is instanced at the path end through ONE
-#     affine matrix (translate the reference point to the origin, scale,
-#     rotate to the tangent, translate to the end) and its prims become
-#     ordinary scene pieces, named mermaid:marker:<id>.
+#     diamond end bigger than Word's largest) is instanced at the path end
+#     through ONE affine matrix (translate the reference point to the origin,
+#     scale, rotate to the tangent, translate to the end) and its prims
+#     become ordinary scene pieces, named mermaid:marker:<id>.
 # Marker shapes are grouped with their stroke where items are assembled
 # (R/assemble.R).
 
@@ -102,10 +102,7 @@ read_marker <- function(def) {
   prims <- def$prims %||% list()
   boxes <- purrr::map(prims, function(p) as.numeric(unlist(p$bbox)))
   boxes <- purrr::keep(boxes, function(b) length(b) == 4L)
-  content <- if (length(boxes) == 0L) rep(NA_real_, 4L) else {
-    b <- do.call(rbind, boxes)
-    union_box(b[, 1], b[, 2], b[, 3], b[, 4])
-  }
+  content <- if (length(boxes) == 0L) rep(NA_real_, 4L) else union_box(do.call(rbind, boxes))
   one <- if (length(prims) == 1L) prims[[1]]
   list(
     ref = c(prim_number(def$refX), prim_number(def$refY)),
@@ -238,12 +235,7 @@ piece_track <- function(pc) {
 # Where a piece is drawn along a moved track: its box, flips (a line) and
 # path (anything else).
 track_geometry <- function(kind, track) {
-  if (kind == "line") {
-    x <- track$x
-    y <- track$y
-    return(list(box = c(min(x), min(y), abs(diff(x)), abs(diff(y))),
-                flip_h = x[[2]] < x[[1]], flip_v = y[[2]] < y[[1]], path = NULL))
-  }
+  if (kind == "line") return(c(segment_frame(track$x, track$y), list(path = NULL)))
   list(box = path_bbox(track), flip_h = FALSE, flip_v = FALSE, path = track)
 }
 

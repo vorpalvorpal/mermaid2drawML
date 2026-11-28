@@ -131,8 +131,8 @@ bridge_timeout_ms <- function(timeout) {
   max(5000, round((timeout - .bridge_startup_s) * 1000))
 }
 
-# The error class for each kind of failure the bridge reports. An older
-# bridge reports no kind, and only ever reported Mermaid's own errors.
+# The error class for each kind of failure the bridge reports; a failure
+# without a known kind is Mermaid's own error.
 .failure_classes <- c(syntax = "mermaid2drawml_syntax_error",
                       timeout = "mermaid2drawml_timeout",
                       bridge = "mermaid2drawml_render_error")

@@ -256,11 +256,7 @@ dash_preset <- function(dash, stroke_w) {
 geometry_xml <- function(it, w, h, s) {
   if (!is.na(it$prst)) return(dml_prst_geom(it$prst, it$adj))
   if (is.null(it$path)) return(dml_prst_geom("rect"))
-  p <- it$path
-  rel <- function(v, o) (v - o) * s
-  local <- vctrs::new_data_frame(list(cmd = p$cmd, x1 = rel(p$x1, it$x), y1 = rel(p$y1, it$y),
-                                      x2 = rel(p$x2, it$x), y2 = rel(p$y2, it$y),
-                                      x = rel(p$x, it$x), y = rel(p$y, it$y)))
+  local <- path_map_points(it$path, function(x, y) list(x = (x - it$x) * s, y = (y - it$y) * s))
   dml_cust_geom(local, w, h)
 }
 
@@ -297,7 +293,7 @@ shape_xml <- function(it, items, origin, ctx) {
     it$name, shape_role(it), sp_pr,
     txbx = if (has_text) dml_txbx(it$text, ctx$style, href = ctx$field_href(it$href)),
     body_pr = if (has_text) {
-      dml_body_pr(emu(it$text$insets, s), it$text$valign %||% "center")
+      dml_body_pr(emu(it$text$insets, s), it$text$valign)
     } else {
       xml_tag("wps:bodyPr")
     },

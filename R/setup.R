@@ -46,15 +46,19 @@ installed_version <- function(dir) {
 #' Set up Node.js dependencies for mermaid2drawml
 #'
 #' Installs the Node.js packages that render Mermaid diagrams. Run it once
-#' after installing or updating the R package. Node.js (>= 18) and npm must be
-#' on `PATH`.
+#' after installing the R package, and again after every update of it: each
+#' version pins its own Node.js packages, and rendering stops with an error
+#' until the installed ones match. Node.js (>= 18) and npm must be on `PATH`.
 #'
 #' The packages, at the versions pinned in the package's `inst/node/package.json`,
 #' are installed into a user-local directory
 #' (`tools::R_user_dir("mermaid2drawml", "data")`):
 #' - `@mermaid-js/mermaid-cli`, which brings Puppeteer and its Chromium
 #'   (about 150 MB);
-#' - `mermaid`, the diagram library itself.
+#' - `mermaid`, the diagram library itself;
+#' - the Font Awesome 6 icon packs `@iconify-json/fa6-solid`,
+#'   `@iconify-json/fa6-regular` and `@iconify-json/fa6-brands`, which draw
+#'   the `fa:`, `fas:`, `far:` and `fab:` icons a diagram names.
 #'
 #' @param upgrade Logical. If `TRUE`, passes `--prefer-online` to npm to
 #'   force fresh downloads. Default `FALSE`.
@@ -136,9 +140,12 @@ setup_problems <- function(packages) {
 
 #' Check that mermaid2drawml's Node.js setup is complete
 #'
-#' Verifies that Node.js is available and that the installed Node packages are
-#' the versions pinned by this version of mermaid2drawml. Rendering functions
-#' call it for you; a passing check is remembered for the session.
+#' Verifies that Node.js is available and that the installed Node packages
+#' (Mermaid, mermaid-cli and the Font Awesome icon packs; see
+#' [setup_mermaid2drawml()]) are the versions pinned by this version of
+#' mermaid2drawml, which is not the case after an update of the R package
+#' until [setup_mermaid2drawml()] is run again. Rendering functions call it
+#' for you; a passing check is remembered for the session.
 #'
 #' @return Invisibly, `TRUE`. Raises an error of class `mermaid2drawml_setup`
 #'   when something is missing or out of date.

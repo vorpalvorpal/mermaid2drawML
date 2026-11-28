@@ -7,6 +7,7 @@
 .emu_per_px <- 9525
 .emu_per_pt <- 12700
 .emu_per_half_pt <- 6350
+.px_per_inch <- .emu_per_inch / .emu_per_px
 
 # Characters XML 1.0 forbids. The browser can hand them over in text, and
 # one of them marks the shape ids still to be numbered (R/emit.R), so no

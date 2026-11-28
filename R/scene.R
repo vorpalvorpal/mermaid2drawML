@@ -367,7 +367,7 @@ new_piece <- function(p, kind, box, rot = 0, prst = NA_character_,
     html = isTRUE(p$html), corner_r = corner_r,
     id = as.character(p$id %||% ""), cls = as.character(p$cls %||% ""),
     anc = list(p$anc %||% list()), data = list(p$data %||% list()),
-    marker_start = marker_id(p$marker_start), marker_end = marker_id(p$marker_end),
+    marker_start = json_word(p$marker_start), marker_end = json_word(p$marker_end),
     scope = anc_scope(p$anc), chain = list(anc_serials(p$anc)), unit = list(p$unit),
     inline = isTRUE(p$inline)
   )
@@ -382,16 +382,22 @@ new_piece <- function(p, kind, box, rot = 0, prst = NA_character_,
 #' @noRd
 anc_href <- function(anc) {
   # Base iteration: this runs for every prim.
-  hrefs <- vapply(anc %||% list(), function(a) {
-    h <- a$href
-    if (is.null(h) || length(h) == 0L || is.na(h[[1]])) NA_character_ else as.character(h[[1]])
-  }, character(1))
+  hrefs <- vapply(anc %||% list(), function(a) json_chr(a$href), character(1))
   near <- utils::tail(hrefs[!is.na(hrefs)], 1L)
   if (length(near) == 1L && grepl(.link_schemes, near, ignore.case = TRUE)) near else NA_character_
 }
 
-marker_id <- function(x) {
-  if (length(x) == 0L || is.na(x[[1]]) || !nzchar(x[[1]])) NA_character_ else as.character(x[[1]])
+#' A field of the bridge's JSON as one string: its first value, NA when it
+#' is missing, empty or null
+#' @noRd
+json_chr <- function(x) {
+  if (length(x) == 0L || isTRUE(is.na(x[[1]]))) NA_character_ else as.character(x[[1]])
+}
+
+# The same, with "" also NA: an id or paint the bridge reports as empty.
+json_word <- function(x) {
+  v <- json_chr(x)
+  if (!is.na(v) && nzchar(v)) v else NA_character_
 }
 
 anc_serials <- function(anc) {
@@ -407,10 +413,8 @@ anc_scope <- function(anc) {
 
 # "#rrggbb" from the bridge -> "RRGGBB"; a missing paint is NA.
 bridge_colour <- function(x) {
-  if (is.null(x) || length(x) == 0L || is.na(x[[1]]) || !nzchar(x[[1]])) {
-    return(NA_character_)
-  }
-  toupper(sub("^#", "", x[[1]]))
+  x <- json_word(x)
+  if (is.na(x)) x else toupper(sub("^#", "", x))
 }
 
 prim_number <- function(x, default = 0) {
@@ -547,18 +551,13 @@ line_piece <- function(p, x, y, paint) {
   paint$fill <- NA_character_
   paint$fill_a <- 0
   paint["fill_grad"] <- list(NULL)
-  new_piece(p, "line", c(min(x), min(y), abs(diff(x)), abs(diff(y))),
-            prst = "line", paint = paint, closed = FALSE,
-            flip_h = x[[2]] < x[[1]], flip_v = y[[2]] < y[[1]])
+  f <- segment_frame(x, y)
+  new_piece(p, "line", f$box, prst = "line", paint = paint, closed = FALSE,
+            flip_h = f$flip_h, flip_v = f$flip_v)
 }
 
-# An open path with a Z appended, so that a four-corner outline can be
-# recognised as the rectangle SVG fills.
-close_subpath <- function(path) {
-  if (path_closed(path)) path else purrr::list_rbind(list(path, path_tbl("Z")))
-}
-
-# Every subpath ended with a Z: the outline of a filled shape.
+# Every subpath ended with a Z: the outline of a filled shape, so that a
+# four-corner outline can be recognised as the rectangle SVG fills.
 close_subpaths <- function(path) {
   if (is.null(path) || nrow(path) == 0L) return(path)
   open_end <- c(path$cmd[-1L] == "M", TRUE) & path$cmd != "Z"
@@ -577,7 +576,12 @@ first_arc_radius <- function(d) {
   abs(as.numeric(hit))
 }
 
-piece_outline <- function(p, local_path) {
+#' A poly or path prim as a piece: a line when it draws no area, else a
+#' shape, the preset it draws when there is one
+#' @param arc_r The first arc radius of its path data, in its own units, or
+#'   NA; taken as the corner radius when no preset gives one.
+#' @noRd
+piece_outline <- function(p, local_path, arc_r = NA_real_) {
   if (nrow(local_path) == 0L) return(NULL)
   m <- prim_matrix(p)
   path <- path_transform(local_path, m)
@@ -595,9 +599,9 @@ piece_outline <- function(p, local_path) {
   closed <- path_closed(path)
   # Closing an open outline would add a stroked side, so only an unstroked
   # open outline may become a preset.
-  figure <- if (closed || is.na(paint$stroke)) closed_figure(close_subpath(path)) else
+  figure <- if (closed || is.na(paint$stroke)) closed_figure(close_subpaths(path)) else
     no_figure(bbox)
-  arc_r <- if (identical(p$kind, "path")) first_arc_radius(p$geom$d) * mat_scale(m) else NA_real_
+  arc_r <- arc_r * mat_scale(m)
   new_piece(p, "shape", figure$box, prst = figure$prst, adj = figure$adj,
             paint = paint, path = path, closed = closed || !is.na(figure$prst),
             corner_r = if (!is.na(figure$corner_r)) figure$corner_r else
@@ -722,7 +726,10 @@ piece_image <- function(p) {
 .piece_converters <- list(
   rect = piece_rect, ellipse = piece_ellipse, line = piece_line,
   poly = function(p) piece_outline(p, poly_path(p$geom$points, isTRUE(p$geom$closed))),
-  path = function(p) piece_outline(p, path_parse(p$geom$d %||% "")),
+  path = function(p) {
+    d <- p$geom$d %||% ""
+    piece_outline(p, path_parse(d), first_arc_radius(d))
+  },
   text = piece_text, image = piece_image
 )
 
@@ -860,7 +867,7 @@ frame_rects <- function(p) {
 
 frame_rect <- function(sides) {
   first <- sides[which.min(sides$pos), ]
-  box <- union_box(sides$x, sides$y, sides$w, sides$h)
+  box <- union_box(box_matrix(sides))
   first$x <- box[[1]]
   first$y <- box[[2]]
   first$w <- box[[3]]
@@ -933,18 +940,27 @@ fold_box <- function(pieces) {
   if (is.na(out$prst)) out <- as_closed_figure(out)
   out$closed <- TRUE
   f <- if (length(filled) > 0L) filled[[1]] else NA_integer_
-  out$fill <- pieces$fill[f]
-  out$fill_a <- if (is.na(f)) 0 else pieces$fill_a[[f]]
-  # A gradient is part of the paint it belongs to.
-  out$fill_grad <- list(if (is.na(f)) NULL else pieces$fill_grad[[f]])
   k <- if (length(stroked) > 0L) max(stroked) else NA_integer_
-  out$stroke <- pieces$stroke[k]
-  out$stroke_a <- if (is.na(k)) 0 else pieces$stroke_a[[k]]
-  out$stroke_w <- if (is.na(k)) 0 else pieces$stroke_w[[k]]
-  out$stroke_grad <- list(if (is.na(k)) NULL else pieces$stroke_grad[[k]])
-  out$dash <- list(if (is.na(k)) NULL else pieces$dash[[k]])
+  paint <- paint_from(pieces, f, k)
+  out[names(paint)] <- paint
   out$href <- first_present(pieces$href)
   out
+}
+
+#' The paint columns, as list(column = value), of an item that takes its
+#' fill from row `f` and its stroke from row `k` of `pieces` (NA: none). A
+#' gradient is part of the paint it belongs to; a stroke's width and dash
+#' come with it.
+#' @noRd
+paint_from <- function(pieces, f, k) {
+  list(
+    fill = pieces$fill[f], fill_a = if (is.na(f)) 0 else pieces$fill_a[[f]],
+    fill_grad = list(if (!is.na(f)) pieces$fill_grad[[f]]),
+    stroke = pieces$stroke[k], stroke_a = if (is.na(k)) 0 else pieces$stroke_a[[k]],
+    stroke_w = if (is.na(k)) 0 else pieces$stroke_w[[k]],
+    stroke_grad = list(if (!is.na(k)) pieces$stroke_grad[[k]]),
+    dash = list(if (!is.na(k)) pieces$dash[[k]])
+  )
 }
 
 # The first value that is not NA, else NA.
@@ -1028,7 +1044,7 @@ split_compartments <- function(p) {
   flat <- .tolerance$flat_px
   lines <- which(p$kind == "line" & no_marker(p) & p$h <= flat & p$w > flat)
   boxes <- which(p$kind == "shape" & p$prst %in% "rect" & abs(p$rot) < .tolerance$angle_deg &
-                   no_marker(p) & purrr::map_lgl(p$text, is.null))
+                   no_marker(p))
   if (length(lines) == 0L || length(boxes) == 0L) return(p)
   cuts <- purrr::map(boxes, function(s) dividers_of(p, s, lines))
   split <- lengths(cuts) > 0L
@@ -1051,10 +1067,9 @@ split_compartments <- function(p) {
 
 # -- text into shapes ---------------------------------------------------------------
 
-# The index (into the shape rows given) of the shape a text merges into, or NA:
-# the smallest shape painted before it, at its rotation, holding its centre
-# and at least 80 % of its area; a tie goes to the one painted last.
-text_container <- function(tb, trot, tpos, sb, srot, spos) {
+# Which shape boxes (rows of `sb`) hold text box `tb`: its centre, and at
+# least the text_cover share of its area.
+holds_text <- function(sb, tb) {
   cx <- tb[[1]] + tb[[3]] / 2
   cy <- tb[[2]] + tb[[4]] / 2
   holds_centre <- sb[, 1] <= cx & cx <= sb[, 1] + sb[, 3] &
@@ -1063,7 +1078,14 @@ text_container <- function(tb, trot, tpos, sb, srot, spos) {
   oh <- pmax(0, pmin(tb[[2]] + tb[[4]], sb[, 2] + sb[, 4]) - pmax(tb[[2]], sb[, 2]))
   area <- tb[[3]] * tb[[4]]
   covers <- if (area > 0) ow * oh / area >= .tolerance$text_cover else rep(TRUE, nrow(sb))
-  ok <- which(holds_centre & covers & abs(srot - trot) < .tolerance$angle_deg & spos < tpos)
+  holds_centre & covers
+}
+
+# The index (into the shape rows given) of the shape a text merges into, or NA:
+# the smallest shape painted before it, at its rotation, that holds it; a tie
+# goes to the one painted last.
+text_container <- function(tb, trot, tpos, sb, srot, spos) {
+  ok <- which(holds_text(sb, tb) & abs(srot - trot) < .tolerance$angle_deg & spos < tpos)
   if (length(ok) == 0L) return(NA_integer_)
   s_area <- sb[ok, 3] * sb[ok, 4]
   best <- ok[s_area == min(s_area)]
@@ -1133,7 +1155,7 @@ combine_texts <- function(texts) {
   boxes <- do.call(rbind, purrr::map(texts, "box"))
   first <- texts[[1]]
   first$rows <- purrr::list_flatten(purrr::map(texts, "rows"))
-  first$box <- union_box(boxes[, 1], boxes[, 2], boxes[, 3], boxes[, 4])
+  first$box <- union_box(boxes)
   first
 }
 
@@ -1152,7 +1174,7 @@ stack_relation <- function(tb, sbox, prst = NA_character_) {
   t <- .tolerance
   rows_ok <- all(overlap <= t$stack_overlap_rel * pmin(tb[-k, 4], tb[-1, 4])) &&
     all(-overlap < t$stack_gap_rel * pmax(tb[-k, 4], tb[-1, 4]))
-  if (!rows_ok || !stack_inside(union_box(tb[, 1], tb[, 2], tb[, 3], tb[, 4]), sbox, prst)) {
+  if (!rows_ok || !stack_inside(union_box(tb), sbox, prst)) {
     return("none")
   }
   cx <- tb[, 1] + tb[, 3] / 2
@@ -1166,7 +1188,7 @@ stack_relation <- function(tb, sbox, prst = NA_character_) {
 # beside a radar chart's outer ring); other figures take the single-text test.
 stack_inside <- function(ub, sbox, prst) {
   if (identical(prst, "ellipse")) return(box_in_ellipse(ub, sbox))
-  !is.na(text_container(ub, 0, Inf, matrix(sbox, 1L), 0, -Inf))
+  isTRUE(holds_text(matrix(sbox, 1L), ub))
 }
 
 # The shape each text picks: among shapes of its own scope first, else among
@@ -1217,12 +1239,13 @@ merge_texts <- function(p) {
   p[setdiff(seq_len(nrow(p)), unlist(merged)), ]
 }
 
-#' Box c(x, y, w, h) holding all the given boxes; NA when there are none
+#' Box c(x, y, w, h) holding all the boxes (rows of a matrix x, y, w, h)
+#' that are known; NA when there are none
 #' @noRd
-union_box <- function(x, y, w, h) {
-  keep <- !is.na(x) & !is.na(y) & !is.na(w) & !is.na(h)
-  if (!any(keep)) return(rep(NA_real_, 4L))
-  x0 <- min(x[keep])
-  y0 <- min(y[keep])
-  c(x0, y0, max(x[keep] + w[keep]) - x0, max(y[keep] + h[keep]) - y0)
+union_box <- function(b) {
+  b <- b[rowSums(is.na(b)) == 0L, , drop = FALSE]
+  if (nrow(b) == 0L) return(rep(NA_real_, 4L))
+  x0 <- min(b[, 1])
+  y0 <- min(b[, 2])
+  c(x0, y0, max(b[, 1] + b[, 3]) - x0, max(b[, 2] + b[, 4]) - y0)
 }

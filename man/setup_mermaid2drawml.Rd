@@ -15,8 +15,9 @@ Invisibly, the path to the Node directory.
 }
 \description{
 Installs the Node.js packages that render Mermaid diagrams. Run it once
-after installing or updating the R package. Node.js (>= 18) and npm must be
-on \code{PATH}.
+after installing the R package, and again after every update of it: each
+version pins its own Node.js packages, and rendering stops with an error
+until the installed ones match. Node.js (>= 18) and npm must be on \code{PATH}.
 }
 \details{
 The packages, at the versions pinned in the package's \code{inst/node/package.json},
@@ -25,6 +26,9 @@ are installed into a user-local directory
 \itemize{
 \item \verb{@mermaid-js/mermaid-cli}, which brings Puppeteer and its Chromium
 (about 150 MB);
-\item \code{mermaid}, the diagram library itself.
+\item \code{mermaid}, the diagram library itself;
+\item the Font Awesome 6 icon packs \verb{@iconify-json/fa6-solid},
+\verb{@iconify-json/fa6-regular} and \verb{@iconify-json/fa6-brands}, which draw
+the \verb{fa:}, \verb{fas:}, \verb{far:} and \verb{fab:} icons a diagram names.
 }
 }

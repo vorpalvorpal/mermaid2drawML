@@ -4,8 +4,8 @@
 # and so through xml_escape(). Lengths given to these builders are already
 # EMU; the conversion from scene px is in R/emit.R.
 #
-# Word is fussy about the wrapper (MS-ODRAWXML 2.16.1), and this markup is
-# the one proven in Word by earlier versions of the package:
+# Word is fussy about the wrapper (MS-ODRAWXML 2.16.1); this is the markup
+# it is known to accept:
 #   - the root wpg:wgp (directly in a:graphicData) has NO cNvPr;
 #   - every nested wpg:grpSp MUST have one;
 #   - element order: cNvPr, cNvGrpSpPr, grpSpPr, children;

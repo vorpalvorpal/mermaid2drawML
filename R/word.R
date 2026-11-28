@@ -23,7 +23,6 @@
 #'   collisions (see [body_add_mermaid()], which picks a free one
 #'   automatically). For a list, the first diagram's id; each next diagram
 #'   starts at the previous one's `next_id`. Default `1L`.
-#' @param timeout Integer. Seconds to allow for the Node.js render. Default 120.
 #' @param orientation Page orientation for the output document: `"portrait"`,
 #'   `"landscape"`, or `"auto"` (default). Auto chooses landscape only when the
 #'   diagram is wider than `auto_aspect` (width/height) **and** would not fit
@@ -55,6 +54,7 @@
 #' @param ... Other arguments passed to [build_diagram_xml()]: `font_scale`,
 #'   `word_font_family`, `align`, `min_stroke_pt`, `alt_text`, `links`,
 #'   `embed_images`.
+#' @inheritParams render_mermaid
 #' @return A `mermaid_word_diagram` object with fields:
 #'   - `xml`: DrawingML XML string ready for [officer::body_add_xml()]
 #'   - `scene`: what was drawn, one row per Word shape or group
@@ -384,19 +384,22 @@ hyperlink_rel_id <- function(rel, url) {
   do.call(officer::prop_section, args)
 }
 
+# The page a diagram is laid out on: A4, its sides in inches, and the
+# margins of a side not given (inches). build_diagram_xml()'s default page
+# size is this page's portrait content area, written out for its usage line.
+.a4_in <- c(short = 8.27, long = 11.69)
+.margin_sides <- c("top", "bottom", "left", "right")
+.default_margins_in <- as.list(stats::setNames(rep(1, 4L), .margin_sides))
+
 #' A4 page size in inches
-#'
-#' The only place the page size is defined.
 #' @param orientation `"portrait"` or `"landscape"`.
 #' @return Named numeric `c(width, height)`.
 #' @noRd
 .page_dims <- function(orientation) {
-  short <- 8.27
-  long  <- 11.69
   if (identical(orientation, "landscape")) {
-    c(width = long, height = short)
+    c(width = .a4_in[["long"]], height = .a4_in[["short"]])
   } else {
-    c(width = short, height = long)
+    c(width = .a4_in[["short"]], height = .a4_in[["long"]])
   }
 }
 
@@ -407,7 +410,7 @@ hyperlink_rel_id <- function(rel, url) {
 #' @return Named numeric `c(width, height)` in inches.
 #' @noRd
 .content_size <- function(orientation, margins) {
-  m <- margins %||% list(top = 1, bottom = 1, left = 1, right = 1)
+  m <- margins %||% .default_margins_in
   dims <- .page_dims(orientation)
   size <- c(width  = dims[["width"]]  - m$left - m$right,
             height = dims[["height"]] - m$top  - m$bottom)
@@ -438,7 +441,7 @@ hyperlink_rel_id <- function(rel, url) {
   if (orientation != "auto") return(orientation)
   if (is.na(height_px) || height_px <= 0) return("portrait")
   wide <- width_px / height_px > auto_aspect
-  too_wide_for_portrait <- width_px / 96 * max_scale > portrait_width_in
+  too_wide_for_portrait <- width_px / .px_per_inch * max_scale > portrait_width_in
   if (isTRUE(wide && too_wide_for_portrait)) "landscape" else "portrait"
 }
 
@@ -451,7 +454,7 @@ hyperlink_rel_id <- function(rel, url) {
 .normalise_margins <- function(page_margins_in) {
   if (is.null(page_margins_in)) return(NULL)
 
-  sides <- c("top", "bottom", "left", "right")
+  sides <- .margin_sides
   bad <- function(msg) {
     cli::cli_abort(msg, class = "mermaid2drawml_bad_margins", call = NULL)
   }
@@ -487,6 +490,7 @@ hyperlink_rel_id <- function(rel, url) {
   if (any(values < 0)) bad("{.arg page_margins_in} must not be negative.")
 
   given <- stats::setNames(as.list(unname(values)), nms)
-  as.list(stats::setNames(vapply(sides, function(s) given[[s]] %||% 1, numeric(1)),
+  as.list(stats::setNames(vapply(sides, function(s) given[[s]] %||% .default_margins_in[[s]],
+                                 numeric(1)),
                           sides))
 }

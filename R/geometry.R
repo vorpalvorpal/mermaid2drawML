@@ -356,12 +356,13 @@ path_parse <- function(d) {
 
 # ---- path operations ---------------------------------------------------------
 
-#' Apply a matrix to every point of a path, control points included
+#' Map every point of a path, control points included, through `f(x, y)`,
+#' which returns list(x, y)
 #' @noRd
-path_transform <- function(path, m) {
-  p <- mat_apply(m, path$x, path$y)
-  c1 <- mat_apply(m, path$x1, path$y1)
-  c2 <- mat_apply(m, path$x2, path$y2)
+path_map_points <- function(path, f) {
+  p <- f(path$x, path$y)
+  c1 <- f(path$x1, path$y1)
+  c2 <- f(path$x2, path$y2)
   path$x <- p$x
   path$y <- p$y
   path$x1 <- c1$x
@@ -369,6 +370,20 @@ path_transform <- function(path, m) {
   path$x2 <- c2$x
   path$y2 <- c2$y
   path
+}
+
+#' Apply a matrix to every point of a path, control points included
+#' @noRd
+path_transform <- function(path, m) {
+  path_map_points(path, function(x, y) mat_apply(m, x, y))
+}
+
+# The box c(x, y, w, h) and flips of the straight segment from its first
+# point (x, y) to its second, as a line preset draws it: from its box's top
+# left to its bottom right, flipped on each axis it runs back along.
+segment_frame <- function(x, y) {
+  list(box = c(min(x), min(y), abs(diff(x)), abs(diff(y))),
+       flip_h = x[[2]] < x[[1]], flip_v = y[[2]] < y[[1]])
 }
 
 # Values of a cubic Bezier (one coordinate) at the roots of its derivative
@@ -581,14 +596,8 @@ single_closed <- function(path) {
 path_on_ellipse <- function(path, box, tol) {
   if (!single_closed(path)) return(FALSE)
   seg <- path_segments(path)
-  a <- box[[3]] / 2
-  b <- box[[4]] / 2
-  if (nrow(seg) < 4L || a <= 0 || b <= 0) return(FALSE)
-  dx <- c(seg$x, seg$mx) - (box[[1]] + a)
-  dy <- c(seg$y, seg$my) - (box[[2]] + b)
-  r <- sqrt((dx / a)^2 + (dy / b)^2)
-  dist <- ifelse(r > 0, abs(1 - 1 / r) * sqrt(dx^2 + dy^2), min(a, b))
-  all(dist <= tol)
+  if (nrow(seg) < 4L || box[[3]] <= 0 || box[[4]] <= 0) return(FALSE)
+  all(ellipse_dist(c(seg$x, seg$mx), c(seg$y, seg$my), box) <= tol)
 }
 
 #' The common corner radius of a closed path that is a rectangle with four

@@ -30,7 +30,10 @@ collisions (see \code{\link[=body_add_mermaid]{body_add_mermaid()}}, which picks
 automatically). For a list, the first diagram's id; each next diagram
 starts at the previous one's \code{next_id}. Default \code{1L}.}
 
-\item{timeout}{Integer. Seconds to allow for the Node.js render. Default 120.}
+\item{timeout}{Seconds the whole render may take, Node and Chrome start-up
+included; Chrome can be slow to start the first time. The bridge is
+given this less a start-up allowance (never under 5 seconds) as its own
+limit for each page.}
 
 \item{orientation}{Page orientation for the output document: \code{"portrait"},
 \code{"landscape"}, or \code{"auto"} (default). Auto chooses landscape only when the

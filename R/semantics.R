@@ -9,12 +9,55 @@
 
 # ---- the shape registry ------------------------------------------------------
 
-#' Flowchart shapes whose Word preset is the same figure
-#'
-#' One row per name a node can carry in `db$nodes[[i]]$shape`: Mermaid's
-#' internal names and every `@{ shape: ... }` short name and alias (from the
-#' shape definitions in mermaid/dist). Shapes Word has no true preset for are
-#' left out, so they are drawn from their real outline.
+# Flowchart shapes whose Word preset is the same figure, one row per figure
+# with every name a node of it can carry in `db$nodes[[i]]$shape`: Mermaid's
+# internal names and every `@{ shape: ... }` short name and alias (from the
+# shape definitions in mermaid/dist). Shapes Word has no true preset for are
+# left out, so they are drawn from their real outline. No figure is flipped
+# vertically: Word would turn its text upside down.
+.registry_figures <- tibble::tribble(
+  ~prst,                         ~flip_h, ~adj,    ~adj_default, ~shapes,
+  # rectangles
+  "rect",                        FALSE,   "none",  NA,    c("squareRect", "rect", "proc", "process", "rectangle", "text",
+                                                            "fork", "join", "forkJoin"),
+  "roundRect",                   FALSE,   "round", NA,    c("roundedRect", "rounded", "event"),
+  "roundRect",                   FALSE,   "round", 50000, c("stadium", "terminal", "pill"),
+  "snip1Rect",                   TRUE,    "none",  NA,    c("notch-rect", "card", "notched-rectangle"),
+  # circles and ellipses
+  "ellipse",                     FALSE,   "none",  NA,    c("circle", "circ", "ellipse", "sm-circ", "start",
+                                                            "small-circle", "stateStart", "f-circ", "junction",
+                                                            "filled-circle"),
+  "flowChartSummingJunction",    FALSE,   "none",  NA,    c("cross-circ", "summary", "crossed-circle"),
+  # polygons; "choice" is the state diagram's choice pseudo-state
+  "diamond",                     FALSE,   "none",  NA,    c("diamond", "choice", "diam", "decision", "question"),
+  "hexagon",                     FALSE,   "hex",   NA,    c("hexagon", "hex", "prepare"),
+  "parallelogram",               FALSE,   "slant", NA,    c("lean_right", "lean-r", "lean-right", "in-out"),
+  "parallelogram",               TRUE,    "slant", NA,    c("lean_left", "lean-l", "lean-left", "out-in"),
+  "trapezoid",                   FALSE,   "slant", NA,    c("trapezoid", "trap-b", "priority", "trapezoid-bottom"),
+  "flowChartExtract",            FALSE,   "none",  NA,    c("tri", "extract", "triangle"),
+  "flowChartMerge",              FALSE,   "none",  NA,    c("flip-tri", "manual-file", "flipped-triangle"),
+  "flowChartCollate",            FALSE,   "none",  NA,    c("hourglass", "collate"),
+  "flowChartManualInput",        FALSE,   "none",  NA,    c("sl-rect", "manual-input", "sloped-rectangle"),
+  # flowchart symbols
+  "flowChartPredefinedProcess",  FALSE,   "none",  NA,    c("subroutine", "fr-rect", "subprocess", "subproc",
+                                                            "framed-rectangle"),
+  "flowChartDocument",           FALSE,   "none",  NA,    c("doc", "document"),
+  "flowChartMultidocument",      FALSE,   "none",  NA,    c("docs", "documents", "st-doc", "stacked-document"),
+  "flowChartInternalStorage",    FALSE,   "none",  NA,    c("win-pane", "internal-storage", "window-pane"),
+  "flowChartDelay",              FALSE,   "none",  NA,    c("delay", "half-rounded-rectangle"),
+  "flowChartDisplay",            FALSE,   "none",  NA,    c("curv-trap", "curved-trapezoid", "display"),
+  "flowChartOnlineStorage",      FALSE,   "none",  NA,    c("bow-rect", "stored-data", "bow-tie-rectangle"),
+  "flowChartPunchedTape",        FALSE,   "none",  NA,    c("flag", "paper-tape"),
+  # cylinders
+  "can",                         FALSE,   "none",  NA,    c("cylinder", "cyl", "db", "database"),
+  "flowChartMagneticDrum",       FALSE,   "none",  NA,    c("h-cyl", "das", "horizontal-cylinder"),
+  "flowChartMagneticDisk",       FALSE,   "none",  NA,    c("lin-cyl", "disk", "lined-cylinder"),
+  # pictures
+  "cloud",                       FALSE,   "none",  NA,    "cloud",
+  "lightningBolt",               FALSE,   "none",  NA,    c("bolt", "com-link", "lightning-bolt")
+)
+
+#' The shape registry: one row per shape name
 #'
 #' Columns: `shape`; `prst`, the Word preset; `flip_h`, `flip_v`; `adj`, how
 #' the adjust value is measured from the drawing ("none"; "round": the corner
@@ -24,126 +67,16 @@
 #' NA for the preset's own default.
 #' @noRd
 shape_registry <- function() {
-  tibble::tribble(
-    ~shape,                   ~prst,                         ~flip_h, ~flip_v, ~adj,    ~adj_default,
-    # rectangles
-    "squareRect",             "rect",                        FALSE,   FALSE,   "none",  NA,
-    "rect",                   "rect",                        FALSE,   FALSE,   "none",  NA,
-    "proc",                   "rect",                        FALSE,   FALSE,   "none",  NA,
-    "process",                "rect",                        FALSE,   FALSE,   "none",  NA,
-    "rectangle",              "rect",                        FALSE,   FALSE,   "none",  NA,
-    "text",                   "rect",                        FALSE,   FALSE,   "none",  NA,
-    "fork",                   "rect",                        FALSE,   FALSE,   "none",  NA,
-    "join",                   "rect",                        FALSE,   FALSE,   "none",  NA,
-    "forkJoin",               "rect",                        FALSE,   FALSE,   "none",  NA,
-    "roundedRect",            "roundRect",                   FALSE,   FALSE,   "round", NA,
-    "rounded",                "roundRect",                   FALSE,   FALSE,   "round", NA,
-    "event",                  "roundRect",                   FALSE,   FALSE,   "round", NA,
-    "stadium",                "roundRect",                   FALSE,   FALSE,   "round", 50000,
-    "terminal",               "roundRect",                   FALSE,   FALSE,   "round", 50000,
-    "pill",                   "roundRect",                   FALSE,   FALSE,   "round", 50000,
-    "notch-rect",             "snip1Rect",                   TRUE,    FALSE,   "none",  NA,
-    "card",                   "snip1Rect",                   TRUE,    FALSE,   "none",  NA,
-    "notched-rectangle",      "snip1Rect",                   TRUE,    FALSE,   "none",  NA,
-    # circles and ellipses
-    "circle",                 "ellipse",                     FALSE,   FALSE,   "none",  NA,
-    "circ",                   "ellipse",                     FALSE,   FALSE,   "none",  NA,
-    "ellipse",                "ellipse",                     FALSE,   FALSE,   "none",  NA,
-    "sm-circ",                "ellipse",                     FALSE,   FALSE,   "none",  NA,
-    "start",                  "ellipse",                     FALSE,   FALSE,   "none",  NA,
-    "small-circle",           "ellipse",                     FALSE,   FALSE,   "none",  NA,
-    "stateStart",             "ellipse",                     FALSE,   FALSE,   "none",  NA,
-    "f-circ",                 "ellipse",                     FALSE,   FALSE,   "none",  NA,
-    "junction",               "ellipse",                     FALSE,   FALSE,   "none",  NA,
-    "filled-circle",          "ellipse",                     FALSE,   FALSE,   "none",  NA,
-    "cross-circ",             "flowChartSummingJunction",    FALSE,   FALSE,   "none",  NA,
-    "summary",                "flowChartSummingJunction",    FALSE,   FALSE,   "none",  NA,
-    "crossed-circle",         "flowChartSummingJunction",    FALSE,   FALSE,   "none",  NA,
-    # polygons
-    "diamond",                "diamond",                     FALSE,   FALSE,   "none",  NA,
-    # the state diagram's choice pseudo-state
-    "choice",                 "diamond",                     FALSE,   FALSE,   "none",  NA,
-    "diam",                   "diamond",                     FALSE,   FALSE,   "none",  NA,
-    "decision",               "diamond",                     FALSE,   FALSE,   "none",  NA,
-    "question",               "diamond",                     FALSE,   FALSE,   "none",  NA,
-    "hexagon",                "hexagon",                     FALSE,   FALSE,   "hex",   NA,
-    "hex",                    "hexagon",                     FALSE,   FALSE,   "hex",   NA,
-    "prepare",                "hexagon",                     FALSE,   FALSE,   "hex",   NA,
-    "lean_right",             "parallelogram",               FALSE,   FALSE,   "slant", NA,
-    "lean-r",                 "parallelogram",               FALSE,   FALSE,   "slant", NA,
-    "lean-right",             "parallelogram",               FALSE,   FALSE,   "slant", NA,
-    "in-out",                 "parallelogram",               FALSE,   FALSE,   "slant", NA,
-    "lean_left",              "parallelogram",               TRUE,    FALSE,   "slant", NA,
-    "lean-l",                 "parallelogram",               TRUE,    FALSE,   "slant", NA,
-    "lean-left",              "parallelogram",               TRUE,    FALSE,   "slant", NA,
-    "out-in",                 "parallelogram",               TRUE,    FALSE,   "slant", NA,
-    "trapezoid",              "trapezoid",                   FALSE,   FALSE,   "slant", NA,
-    "trap-b",                 "trapezoid",                   FALSE,   FALSE,   "slant", NA,
-    "priority",               "trapezoid",                   FALSE,   FALSE,   "slant", NA,
-    "trapezoid-bottom",       "trapezoid",                   FALSE,   FALSE,   "slant", NA,
-    "tri",                    "flowChartExtract",            FALSE,   FALSE,   "none",  NA,
-    "extract",                "flowChartExtract",            FALSE,   FALSE,   "none",  NA,
-    "triangle",               "flowChartExtract",            FALSE,   FALSE,   "none",  NA,
-    "flip-tri",               "flowChartMerge",              FALSE,   FALSE,   "none",  NA,
-    "manual-file",            "flowChartMerge",              FALSE,   FALSE,   "none",  NA,
-    "flipped-triangle",       "flowChartMerge",              FALSE,   FALSE,   "none",  NA,
-    "hourglass",              "flowChartCollate",            FALSE,   FALSE,   "none",  NA,
-    "collate",                "flowChartCollate",            FALSE,   FALSE,   "none",  NA,
-    "sl-rect",                "flowChartManualInput",        FALSE,   FALSE,   "none",  NA,
-    "manual-input",           "flowChartManualInput",        FALSE,   FALSE,   "none",  NA,
-    "sloped-rectangle",       "flowChartManualInput",        FALSE,   FALSE,   "none",  NA,
-    # flowchart symbols
-    "subroutine",             "flowChartPredefinedProcess",  FALSE,   FALSE,   "none",  NA,
-    "fr-rect",                "flowChartPredefinedProcess",  FALSE,   FALSE,   "none",  NA,
-    "subprocess",             "flowChartPredefinedProcess",  FALSE,   FALSE,   "none",  NA,
-    "subproc",                "flowChartPredefinedProcess",  FALSE,   FALSE,   "none",  NA,
-    "framed-rectangle",       "flowChartPredefinedProcess",  FALSE,   FALSE,   "none",  NA,
-    "doc",                    "flowChartDocument",           FALSE,   FALSE,   "none",  NA,
-    "document",               "flowChartDocument",           FALSE,   FALSE,   "none",  NA,
-    "docs",                   "flowChartMultidocument",      FALSE,   FALSE,   "none",  NA,
-    "documents",              "flowChartMultidocument",      FALSE,   FALSE,   "none",  NA,
-    "st-doc",                 "flowChartMultidocument",      FALSE,   FALSE,   "none",  NA,
-    "stacked-document",       "flowChartMultidocument",      FALSE,   FALSE,   "none",  NA,
-    "win-pane",               "flowChartInternalStorage",    FALSE,   FALSE,   "none",  NA,
-    "internal-storage",       "flowChartInternalStorage",    FALSE,   FALSE,   "none",  NA,
-    "window-pane",            "flowChartInternalStorage",    FALSE,   FALSE,   "none",  NA,
-    "delay",                  "flowChartDelay",              FALSE,   FALSE,   "none",  NA,
-    "half-rounded-rectangle", "flowChartDelay",              FALSE,   FALSE,   "none",  NA,
-    "curv-trap",              "flowChartDisplay",            FALSE,   FALSE,   "none",  NA,
-    "curved-trapezoid",       "flowChartDisplay",            FALSE,   FALSE,   "none",  NA,
-    "display",                "flowChartDisplay",            FALSE,   FALSE,   "none",  NA,
-    "bow-rect",               "flowChartOnlineStorage",      FALSE,   FALSE,   "none",  NA,
-    "stored-data",            "flowChartOnlineStorage",      FALSE,   FALSE,   "none",  NA,
-    "bow-tie-rectangle",      "flowChartOnlineStorage",      FALSE,   FALSE,   "none",  NA,
-    "flag",                   "flowChartPunchedTape",        FALSE,   FALSE,   "none",  NA,
-    "paper-tape",             "flowChartPunchedTape",        FALSE,   FALSE,   "none",  NA,
-    # cylinders
-    "cylinder",               "can",                         FALSE,   FALSE,   "none",  NA,
-    "cyl",                    "can",                         FALSE,   FALSE,   "none",  NA,
-    "db",                     "can",                         FALSE,   FALSE,   "none",  NA,
-    "database",               "can",                         FALSE,   FALSE,   "none",  NA,
-    "h-cyl",                  "flowChartMagneticDrum",       FALSE,   FALSE,   "none",  NA,
-    "das",                    "flowChartMagneticDrum",       FALSE,   FALSE,   "none",  NA,
-    "horizontal-cylinder",    "flowChartMagneticDrum",       FALSE,   FALSE,   "none",  NA,
-    "lin-cyl",                "flowChartMagneticDisk",       FALSE,   FALSE,   "none",  NA,
-    "disk",                   "flowChartMagneticDisk",       FALSE,   FALSE,   "none",  NA,
-    "lined-cylinder",         "flowChartMagneticDisk",       FALSE,   FALSE,   "none",  NA,
-    # pictures
-    "cloud",                  "cloud",                       FALSE,   FALSE,   "none",  NA,
-    "bolt",                   "lightningBolt",               FALSE,   FALSE,   "none",  NA,
-    "com-link",               "lightningBolt",               FALSE,   FALSE,   "none",  NA,
-    "lightning-bolt",         "lightningBolt",               FALSE,   FALSE,   "none",  NA
-  )
+  figs <- .registry_figures
+  rows <- rep(seq_len(nrow(figs)), lengths(figs$shapes))
+  tibble::tibble(shape = unlist(figs$shapes), prst = figs$prst[rows],
+                 flip_h = figs$flip_h[rows], flip_v = FALSE, adj = figs$adj[rows],
+                 adj_default = figs$adj_default[rows])
 }
 
 # ---- Mermaid's node data --------------------------------------------------------
 
-db_field <- function(xs, name) {
-  purrr::map_chr(xs, function(x) {
-    v <- x[[name]]
-    if (is.null(v) || length(v) == 0L) NA_character_ else as.character(v[[1]])
-  })
-}
+db_field <- function(xs, name) purrr::map_chr(xs, function(x) json_chr(x[[name]]))
 
 # What the db says about each node and group, by its id (a unit's id).
 db_node_table <- function(db) {
@@ -184,11 +117,8 @@ piece_unit <- function(i, unit, anc) {
 is_unit <- function(unit) isTRUE(unit$kind %in% .unit_kinds)
 
 unit_fields <- function(unit, sig, hand_drawn) {
-  field <- function(name) {
-    v <- unit[[name]]
-    if (is.null(v) || length(v) == 0L || is.na(v[[1]])) NA_character_ else as.character(v[[1]])
-  }
-  list(kind = field("kind"), id = field("id"), start = field("start"), end = field("end"),
+  list(kind = json_chr(unit[["kind"]]), id = json_chr(unit[["id"]]),
+       start = json_chr(unit[["start"]]), end = json_chr(unit[["end"]]),
        sig = sig, hand_drawn = hand_drawn)
 }
 
@@ -267,6 +197,14 @@ inset_adj <- function(pts, box) {
   c(adj = round(100000 * inset / min(box[[3]], box[[4]])))
 }
 
+# The inset adjust of a slanted or hexagonal node, from the points that
+# outline its shape pieces.
+outline_inset_adj <- function(shapes, box) {
+  pts <- purrr::list_rbind(purrr::pmap(
+    list(shapes$path, shapes$x, shapes$y, shapes$w, shapes$h), piece_points))
+  inset_adj(pts, box)
+}
+
 # How each registry `adj` kind is measured from the node's shape pieces.
 .adj_measures <- list(
   none = function(shapes, box) numeric(),
@@ -274,13 +212,9 @@ inset_adj <- function(pts, box) {
     r <- shapes$corner_r[!is.na(shapes$corner_r)]
     if (length(r) == 0L) numeric() else round_adj(r[[1]], box)
   },
-  slant = function(shapes, box) {
-    pts <- purrr::list_rbind(purrr::pmap(
-      list(shapes$path, shapes$x, shapes$y, shapes$w, shapes$h), piece_points))
-    inset_adj(pts, box)
-  }
+  slant = outline_inset_adj,
+  hex = outline_inset_adj
 )
-.adj_measures$hex <- .adj_measures$slant
 
 #' A node with a registered preset as ONE shape: the box of all its drawn
 #' prims, the fill of the largest filled one, the outline of the last stroked
@@ -288,8 +222,8 @@ inset_adj <- function(pts, box) {
 #' @noRd
 registered_item <- function(pu, reg, hand_drawn, name) {
   # An icon in the label is no part of the node's outline or paint.
-  shapes <- pu[pu$kind %in% c("shape", "line") & !pu$html & !pu$inline, ]
-  box <- union_box(shapes$x, shapes$y, shapes$w, shapes$h)
+  shapes <- pu[outline_pieces(pu), ]
+  box <- union_box(box_matrix(shapes))
 
   filled <- which(!is.na(shapes$fill))
   fill_from <- if (length(filled) > 0L) {
@@ -313,23 +247,18 @@ registered_item <- function(pu, reg, hand_drawn, name) {
   texts <- pu[pu$kind == "text", ]
   text <- if (nrow(texts) > 0L) place_text(combine_texts(texts$text), box)
 
-  new_item(
+  paint <- paint_from(shapes, fill_from, stroke_from)
+  if (hachure) paint[c("fill", "fill_a")] <- list(shapes$stroke[[1]], shapes$stroke_a[[1]])
+
+  rlang::exec(
+    new_item,
     name = name, kind = "shape",
     x = box[[1]], y = box[[2]], w = box[[3]], h = box[[4]],
-    prst = prst,
-    fill = if (hachure) shapes$stroke[[1]] else shapes$fill[fill_from],
-    stroke = shapes$stroke[stroke_from],
-    fill_a = if (hachure) shapes$stroke_a[[1]] else
-      if (is.na(fill_from)) 0 else shapes$fill_a[[fill_from]],
-    stroke_a = if (is.na(stroke_from)) 0 else shapes$stroke_a[[stroke_from]],
-    stroke_w = if (is.na(stroke_from)) 0 else shapes$stroke_w[[stroke_from]],
-    fill_grad = list(if (!hachure && !is.na(fill_from)) shapes$fill_grad[[fill_from]]),
-    stroke_grad = list(if (!is.na(stroke_from)) shapes$stroke_grad[[stroke_from]]),
+    prst = prst, !!!paint,
     fill_pattern = if (hachure) hatch_pattern(shapes$path[[1]]) else NA_character_,
     label = paste(texts$label, collapse = "\n"),
     flip_h = reg$flip_h, flip_v = reg$flip_v, adj = list(adj),
     closed = TRUE,
-    dash = list(if (is.na(stroke_from)) NULL else shapes$dash[[stroke_from]]),
     text = list(text),
     href = first_present(pu$href),
     depth = 0L
