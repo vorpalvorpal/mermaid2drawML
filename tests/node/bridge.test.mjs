@@ -3,42 +3,10 @@
 // rendered in one invocation and every test asserts on that shared result.
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const here = path.dirname(fileURLToPath(import.meta.url));
-const bridge = path.resolve(here, '..', '..', 'inst', 'node', 'mermaid_bridge.js');
-
-function defaultDepsDir() {
-  const home = os.homedir();
-  if (process.platform === 'darwin')
-    return path.join(home, 'Library', 'Application Support', 'org.R-project.R', 'R', 'mermaid2drawml');
-  if (process.platform === 'win32')
-    return path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'R', 'data', 'R', 'mermaid2drawml');
-  return path.join(process.env.XDG_DATA_HOME || path.join(home, '.local', 'share'), 'R', 'mermaid2drawml');
-}
-const depsDir = process.env.M2D_NODE_DIR || defaultDepsDir();
-const haveDeps = fs.existsSync(path.join(depsDir, 'node_modules', '@mermaid-js', 'mermaid-cli'));
-const skipReason = haveDeps ? false
-  : `mermaid-cli not found under ${depsDir}/node_modules; set M2D_NODE_DIR or install the dependencies`;
-
-const childEnv = { ...process.env, M2D_NODE_DIR: depsDir };
-const macChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-if (!childEnv.PUPPETEER_EXECUTABLE_PATH && process.platform === 'darwin' && fs.existsSync(macChrome))
-  childEnv.PUPPETEER_EXECUTABLE_PATH = macChrome;
-
-function runBridge(args) {
-  return spawnSync(process.execPath, [bridge, ...args], {
-    env: childEnv, encoding: 'utf8', timeout: 120000, maxBuffer: 256 * 1024 * 1024,
-  });
-}
-function parseOut(r) {
-  assert.equal(r.status, 0, `bridge exited ${r.status}; stderr: ${(r.stderr || '').slice(-2000)}`);
-  return JSON.parse(r.stdout);
-}
+import { skipReason, runBridge, parseOut } from './harness.mjs';
 
 // ---- diagram sources -------------------------------------------------------
 const FLOW = `flowchart TB
@@ -172,7 +140,7 @@ describe('mermaid bridge', { skip: skipReason }, () => {
       assert.equal(flow.ok, true);
       assert.equal(flow.type, 'flowchart-v2');
       assert.equal(flow.role, 'flowchart-v2');
-      assert.equal(flow.bridge, 3);
+      assert.equal(flow.bridge, 4);
       assert.match(flow.mermaid, /^\d+\.\d+\.\d+/);
       assert.ok(flow.svg.startsWith('<svg'));
     });
