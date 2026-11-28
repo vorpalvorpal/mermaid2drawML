@@ -129,3 +129,39 @@ test_that("no diagram in the classic look gets a pattern fill", {
     expect_length(xfind(fixture_doc(name), "//a:pattFill"), 0L)
   }
 })
+
+# -- Hand-drawn nodes with no fill -------------------------------------------------
+
+# An unfilled hand-drawn node (fill:none or fill:transparent) is drawn as its
+# outline path alone, with no hatch under it. A lone outline is not a hatch:
+# the node has no fill, and the outline stays a stroke.
+test_that("a hand-drawn rect drawn as its outline alone has no fill", {
+  r <- handdrawn_node_render(outline = "#999999", outline_only = TRUE)
+  a <- node_a(r)
+  expect_true(is.na(a$fill))
+  expect_true(is.na(a$fill_pattern))
+  expect_equal(a$stroke, "999999")
+  sp <- shape_sppr(node_a_xml(r))
+  expect_false(is_missing_node(xfirst(sp, "./a:noFill")))
+  expect_null(patt_of(sp))
+  expect_equal(shape_ln(node_a_xml(r))$color, "999999")
+})
+
+test_that("a hand-drawn diamond drawn as its outline alone has no fill", {
+  r <- handdrawn_node_render(outline = "#999999", outline_only = TRUE, shape = "diamond")
+  a <- node_a(r)
+  expect_true(is.na(a$fill))
+  expect_true(is.na(a$fill_pattern))
+  expect_equal(a$stroke, "999999")
+  sp <- shape_sppr(node_a_xml(r))
+  expect_false(is_missing_node(xfirst(sp, "./a:noFill")))
+  expect_null(patt_of(sp))
+})
+
+test_that("a hatch with an outline is still a pattern fill, for a rect and a diamond", {
+  for (shape in c("squareRect", "diamond")) {
+    r <- handdrawn_node_render(shape = shape)
+    expect_equal(node_a(r)$fill_pattern, "ltUpDiag", info = shape)
+    expect_false(is.null(patt_of(shape_sppr(node_a_xml(r)))), info = shape)
+  }
+})

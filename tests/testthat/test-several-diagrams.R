@@ -86,3 +86,32 @@ test_that("mermaid_to_word() on a list of one gives a list of one diagram", {
   expect_s3_class(ds[[1]], "mermaid_word_diagram")
   expect_equal(ds[[1]]$start_id, 3L)
 })
+
+# -- The timeout is per diagram ---------------------------------------------------
+
+# `timeout` is the time one diagram gets. A list of diagrams shares one bridge
+# run, so the process as a whole is allowed more time the more diagrams it has,
+# while the bridge's own per-diagram limit (--timeout) is the same as for one.
+bridge_timeout_arg <- function(st) {
+  args <- st$call$args
+  args[[match("--timeout", args) + 1L]]
+}
+
+test_that("the process timeout for one diagram, and a list of one, is the timeout", {
+  st1 <- local_mock_bridge()
+  render_mermaid(code_pie, timeout = 100)
+  expect_equal(st1$call$timeout, 100)
+  st2 <- local_mock_bridge()
+  render_mermaid(list(code_pie), timeout = 100)
+  expect_equal(st2$call$timeout, 100)
+})
+
+test_that("the process timeout for a list grows with the number of diagrams", {
+  st1 <- local_mock_bridge()
+  render_mermaid(code_pie, timeout = 100)
+  one_arg <- bridge_timeout_arg(st1)
+  st3 <- local_mock_bridge(bridge_ok(bridge_array(rep(fixture_json("pie"), 3L))))
+  render_mermaid(list(code_pie, code_pie, code_pie), timeout = 100)
+  expect_gte(st3$call$timeout, 3 * 100)
+  expect_equal(bridge_timeout_arg(st3), one_arg)
+})

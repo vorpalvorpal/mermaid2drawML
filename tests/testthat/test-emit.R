@@ -707,3 +707,24 @@ test_that("xychart: the rotated axis title carries its rotation", {
   expect_length(box, 1L)
   expect_equal(shape_xfrm(box[[1]])$rot, 270 * 60000)
 })
+
+# NULL for the page size means the default, as it does for mermaid_to_word(),
+# not "no limit on that side".
+test_that("a NULL page_width_in or page_height_in is the default", {
+  wide <- generic_render(list(prim_rect(0, 0, 50, 50)), viewBox = c(0, 0, 2000, 100))
+  expect_identical(build_diagram_xml(wide, page_width_in = NULL)$xml,
+                   build_diagram_xml(wide)$xml)
+  tall <- generic_render(list(prim_rect(0, 0, 50, 50)), viewBox = c(0, 0, 100, 2000))
+  expect_identical(build_diagram_xml(tall, page_height_in = NULL)$xml,
+                   build_diagram_xml(tall)$xml)
+})
+
+test_that("a page size that is not one positive number is an error naming the argument", {
+  r <- generic_render(list(prim_rect(10, 20, 100, 40)))
+  for (bad in list("wide", -1, 0, c(1, 2), NA_real_)) {
+    expect_error(build_diagram_xml(r, page_width_in = bad),
+                 class = "rlang_error", regexp = "page_width_in")
+    expect_error(build_diagram_xml(r, page_height_in = bad),
+                 class = "rlang_error", regexp = "page_height_in")
+  }
+})

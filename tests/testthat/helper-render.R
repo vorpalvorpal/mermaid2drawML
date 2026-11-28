@@ -59,7 +59,7 @@ read_text_file <- function(path) paste(readLines(path, warn = FALSE), collapse =
 
 # Install mocks for node/browser lookup and processx::run. Returns an
 # environment that records the call: `runs` (how many times node was run),
-# `call`, `input` (the last argument's contents) and `input_existed`, `inputs`
+# `call` (with the `timeout` given to processx::run among its elements), `input` (the last argument's contents) and `input_existed`, `inputs`
 # (the contents of every input file, in argument order), and `config` (the
 # parsed --config file), all read at the time of the call.
 local_mock_bridge <- function(result = NULL, browser = NA_character_,

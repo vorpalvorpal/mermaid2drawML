@@ -384,3 +384,22 @@ test_that("setup raises a setup error when npm exits non-zero", {
   local_mock_setup(status = 1L)
   expect_error(quietly(setup_mermaid2drawml()), class = "mermaid2drawml_setup")
 })
+
+# ---- warnings from setup carry a class ---------------------------------------
+
+test_that("an old Node.js is a warning of class mermaid2drawml_old_node", {
+  skip_if(!nzchar(Sys.which("node")), "node is not on PATH")
+  testthat::local_mocked_bindings(
+    run = function(command, args = character(), ...) {
+      list(status = 0L, stdout = "v16.20.0\n", stderr = "", timeout = FALSE)
+    },
+    .package = "processx"
+  )
+  expect_warning(check_node(), class = "mermaid2drawml_old_node")
+})
+
+test_that("an incomplete installation is a warning of class mermaid2drawml_incomplete_setup", {
+  local_mock_setup()
+  expect_warning(suppressMessages(setup_mermaid2drawml()),
+                 class = "mermaid2drawml_incomplete_setup")
+})

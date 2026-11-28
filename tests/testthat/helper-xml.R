@@ -1051,20 +1051,23 @@ hachure_path <- function(x, y, w, h, angle = -41, gap = 5, stroke = "#EEEEEE",
 # A hand-drawn flowchart node: the hachure fill and a rough outline in one
 # node element, the label centred, and a db that says the look is
 # handDrawn. `fill_prim`: the prim drawing the fill (by default the hachure).
+# `outline_only = TRUE` leaves the fill out, as for a node styled fill:none.
 handdrawn_node_render <- function(id = "A", box = c(20, 20, 100, 60), angle = -41,
                                   hatch = "#EEEEEE", outline = "#999999",
                                   fill_prim = NULL, look = "handDrawn",
-                                  shape = "squareRect") {
+                                  shape = "squareRect", outline_only = FALSE) {
   fill_prim <- fill_prim %|null|%
     hachure_path(box[1], box[2], box[3], box[4], angle = angle, stroke = hatch)
   dom <- paste0("flowchart-", id, "-0")
   anc <- anc_node(dom, id = id)
   fill_prim$anc <- anc
+  # `outline_only`: an unfilled node, drawn as the outline path alone.
   outline_prim <- rough_rect(box[1], box[2], box[3], box[4], fill = NULL, stroke = outline,
                              stroke_w = 1.3, anc = anc)
   text <- prim_text("Label", x = box[1] + box[3] / 2 - 20, y = box[2] + box[4] / 2 - 8,
                     w = 40, h = 16, anc = anc_label(anc))
-  mini_render(list(fill_prim, outline_prim, text), viewBox = c(0, 0, 200, 120),
+  prims <- if (isTRUE(outline_only)) list(outline_prim, text) else list(fill_prim, outline_prim, text)
+  mini_render(prims, viewBox = c(0, 0, 200, 120),
               db = mini_db(list(db_node(id, shape = shape, dom_id = dom, look = look))))
 }
 
