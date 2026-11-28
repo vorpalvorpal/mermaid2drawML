@@ -39,3 +39,33 @@ whole_number <- function(v) {
   }
   formatC(round(v) + 0, format = "f", digits = 0)
 }
+
+# ---- small data helpers -------------------------------------------------------
+
+#' A tibble from columns, length-1 columns recycled
+#'
+#' For data frames made once per prim, unit or item: tibble()'s checks and
+#' name repair cost more than the data. Columns must already have the right
+#' types and lengths (1 or n).
+#' @noRd
+quick_tibble <- function(...) {
+  cols <- list(...)
+  n <- if (length(cols) == 0L) 0L else max(vapply(cols, vctrs::vec_size, integer(1)))
+  if (any(vapply(cols, vctrs::vec_size, integer(1)) == 0L)) n <- 0L
+  tibble::new_tibble(vctrs::vec_recycle_common(!!!cols, .size = n), nrow = n)
+}
+
+#' The row numbers of each key, split once
+#'
+#' @param keys A vector (NA is a key like any other).
+#' @return A function of one key giving its rows, integer(0) for a key not
+#'   in `keys`.
+#' @noRd
+rows_by_key <- function(keys) {
+  levels <- unique(keys)
+  rows <- split(seq_along(keys), factor(match(keys, levels), levels = seq_along(levels)))
+  function(key) {
+    j <- match(key, levels)
+    if (is.na(j)) integer() else rows[[j]]
+  }
+}

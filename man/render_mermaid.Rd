@@ -2,28 +2,36 @@
 % Please edit documentation in R/render.R
 \name{render_mermaid}
 \alias{render_mermaid}
-\title{Render a Mermaid diagram in a headless browser}
+\title{Render Mermaid diagrams in a headless browser}
 \usage{
-render_mermaid(mermaid_code, timeout = 120L, config = NULL)
+render_mermaid(mermaid_code, timeout = 120L, config = NULL, svg = FALSE)
 }
 \arguments{
-\item{mermaid_code}{Character. Mermaid source; a vector of lines is joined
-with newlines.}
+\item{mermaid_code}{Mermaid source: a character vector, whose lines are
+joined with newlines into one diagram; or a list of such vectors, each
+rendered as its own diagram in one run of the bridge.}
 
 \item{timeout}{Seconds the whole render may take, Node and Chrome start-up
 included; Chrome can be slow to start the first time. The bridge is
 given this less a start-up allowance (never under 5 seconds) as its own
-limit for the page.}
+limit for each page.}
 
 \item{config}{\code{NULL}, or a named list of Mermaid configuration (for example
 \code{list(theme = "forest")}), written as JSON and given to the bridge.}
+
+\item{svg}{Logical. \code{TRUE} also returns the SVG text Mermaid drew, in the
+\code{svg} field, to look at when a conversion seems wrong. Default \code{FALSE}:
+the conversion never needs it, and it can be large.}
 }
 \value{
-An object of class \code{mermaid_render}: a list with \code{type}, \code{role},
-\code{viewBox} (numeric, length 4), \code{title}, \code{desc}, \code{svg}, \code{prims} (the drawn
+For a character vector, an object of class \code{mermaid_render}: a
+list with \code{type}, \code{role}, \code{viewBox} (numeric, length 4), \code{title},
+\code{desc}, \code{svg} (\code{NULL} unless \code{svg = TRUE}), \code{prims} (the drawn
 primitives), \code{markers} (the line-end markers the primitives use, by id),
 \code{db} (Mermaid's node and edge data, or \code{NULL}) and \code{mermaid} (the
-Mermaid version).
+Mermaid version). For a list, a list of the same length holding one
+\code{mermaid_render} per diagram, in order; a diagram that failed holds the
+error condition it would have raised on its own instead.
 }
 \description{
 Runs the package's Node bridge (\code{inst/node/mermaid_bridge.js}), which has
@@ -32,11 +40,18 @@ drew: positioned shapes with computed paint, laid-out text and Mermaid's
 own node and edge data. The bridge is run from the installed package, so it
 always matches the R code reading its output.
 }
+\details{
+Starting Node and Chrome is most of the time a render takes, so several
+diagrams are best rendered in one call: give \code{mermaid_code} as a list.
+}
 \section{Errors}{
 
 A diagram Mermaid cannot parse or draw is an error of class
-\code{mermaid2drawml_syntax_error}; a render that runs out of time is
-\code{mermaid2drawml_timeout}; any other failure of the bridge or the browser
-is \code{mermaid2drawml_render_error}.
+\code{mermaid2drawml_syntax_error}, with Mermaid's own message in its
+\code{mermaid_message} field; a render that runs out of time is
+\code{mermaid2drawml_timeout}, with the \code{timeout} (seconds) in its field of
+that name; any other failure of the bridge or the browser is
+\code{mermaid2drawml_render_error}. With a list, a failure of the whole run
+(Node or Chrome failing, the run timing out) is still raised.
 }
 

@@ -11,8 +11,9 @@
 #'
 #' The diagram keeps Mermaid's proportions and is shrunk to fit the page if
 #' it is larger; text shrinks with it. Main text below 7 pt signals a
-#' `mermaid2drawml_small_text` warning, and parts of the diagram that cannot
-#' be drawn as shapes (embedded images) a `mermaid2drawml_unsupported` one.
+#' `mermaid2drawml_small_text` warning, whose `points` field holds that size,
+#' and parts of the diagram that cannot be drawn as shapes (embedded images)
+#' a `mermaid2drawml_unsupported` one, whose `tags` field names them.
 #'
 #' @param x A `mermaid_render` from [render_mermaid()], or the scene built
 #'   from one (the `scene` field of a [mermaid_to_word()] result).
@@ -113,7 +114,7 @@ warn_unsupported <- function(tags) {
   if (length(tags) == 0L) return(invisible(NULL))
   cli::cli_warn(
     "Left out what Word shapes cannot show: {.val {tags}}.",
-    class = "mermaid2drawml_unsupported"
+    class = "mermaid2drawml_unsupported", tags = tags
   )
 }
 
@@ -144,12 +145,20 @@ emu_size <- function(px, scale) max(1, emu(px, scale))
 #' placed relative to `origin` (root px), each group with its own children
 #' @noRd
 children_xml <- function(items, parent, origin, ctx) {
-  here <- if (is.na(parent)) is.na(items$parent) else items$parent %in% parent
-  xml <- purrr::pmap_chr(items[here, ], function(...) {
-    item_xml(list(...), items, origin, ctx)
-  })
+  # The rows are split by parent once, so that each group finds its children
+  # without scanning every row.
+  ctx$children <- rows_by_key(items$parent)
+  group_children_xml(items, parent, origin, ctx)
+}
+
+group_children_xml <- function(items, parent, origin, ctx) {
+  here <- ctx$children(parent)
+  xml <- vapply(here, function(r) item_xml(item_row(items, r), items, origin, ctx), character(1))
   paste(xml, collapse = "")
 }
+
+# Row `r` of the items as a plain list, list columns unwrapped.
+item_row <- function(items, r) lapply(items, `[[`, r)
 
 # Every number an item puts in the markup. A non-finite one would be dropped
 # or written as "NA", so the item is named in an error instead.
@@ -176,7 +185,7 @@ item_xml <- function(it, items, origin, ctx) {
   if (it$kind == "group") {
     return(dml_grp(it$name, emu(it$x - origin[[1]], s), emu(it$y - origin[[2]], s),
                    emu_size(it$w, s), emu_size(it$h, s),
-                   children_xml(items, it$name, c(it$x, it$y), ctx)))
+                   group_children_xml(items, it$name, c(it$x, it$y), ctx)))
   }
   shape_xml(it, origin, ctx)
 }
@@ -200,9 +209,9 @@ geometry_xml <- function(it, w, h, s) {
   if (is.null(it$path)) return(dml_prst_geom("rect"))
   p <- it$path
   rel <- function(v, o) (v - o) * s
-  local <- tibble::tibble(cmd = p$cmd, x1 = rel(p$x1, it$x), y1 = rel(p$y1, it$y),
-                          x2 = rel(p$x2, it$x), y2 = rel(p$y2, it$y),
-                          x = rel(p$x, it$x), y = rel(p$y, it$y))
+  local <- vctrs::new_data_frame(list(cmd = p$cmd, x1 = rel(p$x1, it$x), y1 = rel(p$y1, it$y),
+                                      x2 = rel(p$x2, it$x), y2 = rel(p$y2, it$y),
+                                      x = rel(p$x, it$x), y = rel(p$y, it$y)))
   dml_cust_geom(local, w, h)
 }
 

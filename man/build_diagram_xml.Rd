@@ -65,6 +65,7 @@ in-line group of editable shapes. Most users call \code{\link[=mermaid_to_word]{
 \details{
 The diagram keeps Mermaid's proportions and is shrunk to fit the page if
 it is larger; text shrinks with it. Main text below 7 pt signals a
-\code{mermaid2drawml_small_text} warning, and parts of the diagram that cannot
-be drawn as shapes (embedded images) a \code{mermaid2drawml_unsupported} one.
+\code{mermaid2drawml_small_text} warning, whose \code{points} field holds that size,
+and parts of the diagram that cannot be drawn as shapes (embedded images)
+a \code{mermaid2drawml_unsupported} one, whose \code{tags} field names them.
 }

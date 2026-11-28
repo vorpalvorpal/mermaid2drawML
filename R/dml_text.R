@@ -104,10 +104,11 @@ main_half_points <- function(items, scale, font_scale = 1) {
 #' @noRd
 warn_small_text <- function(hp) {
   if (is.na(hp) || hp >= 14L) return(invisible(NULL))
-  pt <- format(hp / 2)
+  points <- hp / 2
+  pt <- format(points)
   cli::cli_warn(
     c("Most of the diagram's text is {pt} pt, below the 7 pt that stays readable.",
       i = "Text shrinks with a diagram scaled to fit the page; use a wider page, landscape orientation, or split the diagram into smaller ones."),
-    class = "mermaid2drawml_small_text"
+    class = "mermaid2drawml_small_text", points = points
   )
 }

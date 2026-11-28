@@ -63,10 +63,15 @@ attr_escape <- function(text) {
 #'   (self-closing) element.
 #' @noRd
 xml_tag <- function(.tag, ..., .children = NULL) {
-  attrs <- purrr::discard(list(...), function(v) is.null(v) || (length(v) == 1L && is.na(v)))
-  attr_str <- paste0(" ", names(attrs), "=\"", purrr::map_chr(attrs, attr_value), "\"",
-                     collapse = "")
-  if (length(attrs) == 0L) attr_str <- ""
+  # Base iteration: this is called for every element of a drawing, and
+  # purrr's per-call checks cost more than the work.
+  attrs <- list(...)
+  given <- vapply(attrs, function(v) !is.null(v) && !(length(v) == 1L && is.na(v)), logical(1))
+  attrs <- attrs[given]
+  attr_str <- if (length(attrs) == 0L) "" else {
+    paste0(" ", names(attrs), "=\"", vapply(attrs, attr_value, character(1)), "\"",
+           collapse = "")
+  }
   if (length(.children) == 0L) return(paste0("<", .tag, attr_str, "/>"))
   paste0("<", .tag, attr_str, ">", paste(.children, collapse = ""), "</", .tag, ">")
 }

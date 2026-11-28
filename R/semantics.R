@@ -1,11 +1,11 @@
 # R/semantics.R
-# What the dagre-family diagrams (flowchart, class, state, ER, requirement,
-# kanban, mindmap) mark in their DOM, and what that means for Word:
-#   - units: nodes, subgraphs, edges and edge labels (spec 3c), joined to
-#     Mermaid's own node/edge data (`db`) when the bridge has it;
-#   - the flowchart shape registry (3d).
-# The generic conversion these build on is in R/scene.R; line ends and the
-# marker table are in R/markers.R.
+# The diagram units the bridge reports (nodes, subgraphs, edges and edge
+# labels of the diagrams whose Mermaid data has them), what Mermaid's own
+# node data says about them, and the flowchart shape registry: which node
+# shapes are a Word preset, and how a registered node becomes one shape.
+# The generic conversion these build on is in R/scene.R; how units and
+# loose items nest and are named is in R/assemble.R; line ends are in
+# R/markers.R.
 
 # ---- the shape registry ------------------------------------------------------
 
@@ -136,7 +136,7 @@ shape_registry <- function() {
   )
 }
 
-# ---- Mermaid's node and edge data ----------------------------------------------
+# ---- Mermaid's node data --------------------------------------------------------
 
 db_field <- function(xs, name) {
   purrr::map_chr(xs, function(x) {
@@ -145,172 +145,100 @@ db_field <- function(xs, name) {
   })
 }
 
+# What the db says about each node and group, by its id (a unit's id).
 db_node_table <- function(db) {
   nodes <- db$nodes %||% list()
-  tibble::tibble(
-    id = db_field(nodes, "id"), dom_id = db_field(nodes, "domId"),
-    shape = db_field(nodes, "shape"), parent = db_field(nodes, "parentId"),
-    look = db_field(nodes, "look"),
+  quick_tibble(
+    id = db_field(nodes, "id"), shape = db_field(nodes, "shape"),
+    parent = db_field(nodes, "parentId"), look = db_field(nodes, "look"),
     is_group = purrr::map_lgl(nodes, function(n) isTRUE(n$isGroup))
   )
 }
 
-db_edge_table <- function(db) {
-  edges <- db$edges %||% list()
-  tibble::tibble(id = db_field(edges, "id"), start = db_field(edges, "start"),
-                 end = db_field(edges, "end"))
-}
-
-#' Row of `table` whose `key` column matches each value, NA for none
-#' @noRd
-match_key <- function(values, keys) match(values, keys, incomparables = NA)
-
-#' The db edge an edge id refers to; the ELK layout names its paths
-#' `L_A_B_0_0` for db edge `L_A_B_0`.
-#' @noRd
-match_edge <- function(ref, edges) {
-  hit <- match_key(ref, edges$id)
-  ifelse(is.na(hit), match_key(sub("_\\d+$", "", ref), edges$id), hit)
-}
-
-# A unit's id when the db does not know it.
-clean_unit_id <- function(dom_id) sub("^flowchart-", "", sub("-\\d+$", "", dom_id))
-
 # ---- units -------------------------------------------------------------------
+#
+# The bridge says which element is which unit: an `anc` entry, or the prim
+# itself for an edge path, carries `unit = {kind, id[, start, end]}`, with
+# `id` the unit's id in Mermaid's own data. Nothing here guesses a unit from
+# classes or DOM ids.
 
-# Class tokens that make an ancestor a unit, tried in order; an ancestor whose
-# id is a db node's domId is a node too (hand-drawn "rough-node", icon and
-# image shapes carry no `node` class).
-.unit_classes <- tibble::tribble(
-  ~kind,        ~pattern,
-  "subgraph",   "(^|-)cluster(-alt)?$",
-  "edge_label", "^edgeLabel$",
-  "node",       "^node$"
-)
+# The unit a piece belongs to: its own (an edge path), else its innermost
+# ancestor's. `sig` tells apart neighbouring units, `hand_drawn` is what the
+# unit's element says about the look.
+piece_unit <- function(i, unit, anc) {
+  if (is_unit(unit)) return(unit_fields(unit, sig = paste0("prim#", i), hand_drawn = FALSE))
+  k <- purrr::detect_index(anc, function(a) is_unit(a$unit), .dir = "backward")
+  if (k == 0L) return(unit_fields(NULL, sig = "", hand_drawn = FALSE))
+  a <- anc[[k]]
+  # Two elements may draw units of one id (an edge's two labels); the DOM
+  # serial keeps them apart.
+  sig <- paste(k, a$n %||% "", a$unit$kind, a$unit$id, sep = "\u001f")
+  unit_fields(a$unit, sig = sig,
+              hand_drawn = "rough-node" %in% class_tokens(a$cls) ||
+                identical(a$data$look, "handDrawn"))
+}
+
+# The kinds of unit the scene assembles; another kind is drawn as loose items.
+.unit_kinds <- c("node", "subgraph", "edge", "edge_label")
+
+is_unit <- function(unit) isTRUE(unit$kind %in% .unit_kinds)
+
+unit_fields <- function(unit, sig, hand_drawn) {
+  field <- function(name) {
+    v <- unit[[name]]
+    if (is.null(v) || length(v) == 0L || is.na(v[[1]])) NA_character_ else as.character(v[[1]])
+  }
+  list(kind = field("kind"), id = field("id"), start = field("start"), end = field("end"),
+       sig = sig, hand_drawn = hand_drawn)
+}
 
 class_tokens <- function(cls) {
   tok <- strsplit(as.character(cls %||% ""), "\\s+")[[1]]
   tok[nzchar(tok)]
 }
 
-anc_unit_kind <- function(a, node_dom_ids) {
-  tokens <- class_tokens(a$cls)
-  hit <- purrr::detect_index(.unit_classes$pattern,
-                             function(pat) any(grepl(pat, tokens)))
-  if (hit > 0L) return(.unit_classes$kind[[hit]])
-  id <- as.character(a$id %||% "")
-  if (nzchar(id) && id %in% node_dom_ids) "node" else NA_character_
-}
-
-# The DOM serial tells apart sibling elements that have no id (bridge 3).
-anc_signature <- function(a) {
-  paste(a$n %||% "", a$id %||% "", a$cls %||% "", a$data$id %||% "", sep = "\u001f")
-}
-
-# A path is a link when it says so or sits under the edge paths group.
-is_link <- function(src_path, data, anc) {
-  src_path && (identical(data$edge, "true") ||
-                 any(purrr::map_lgl(anc, function(a) "edgePaths" %in% class_tokens(a$cls))))
-}
-
-# What unit one piece belongs to: its kind, the unit ancestor's id, the
-# signature that tells sibling units apart, the edge it refers to, and
-# whether the ancestor says the look is hand-drawn.
-piece_unit <- function(i, is_path, id, data, anc, node_dom_ids) {
-  if (is_link(is_path, data, anc)) {
-    ref <- as.character(data$id %||% id)
-    return(list(kind = "edge", anc_id = NA_character_, sig = paste0("edge#", i),
-                ref = if (nzchar(ref)) ref else NA_character_, hand_drawn = FALSE))
-  }
-  kinds <- purrr::map_chr(anc, anc_unit_kind, node_dom_ids)
-  k <- if (any(!is.na(kinds))) max(which(!is.na(kinds))) else 0L
-  if (k == 0L) {
-    return(list(kind = NA_character_, anc_id = NA_character_, sig = "",
-                ref = NA_character_, hand_drawn = FALSE))
-  }
-  a <- anc[[k]]
-  # The nearest element below the unit's that names an edge; an unnamed <g>
-  # (listed since bridge 3) may sit in between.
-  below <- purrr::detect(anc[seq_along(anc) > k], function(b) !is.null(b$data$id))$data$id
-  ref <- as.character(a$data$id %||% below %||% NA_character_)
-  # Sibling edge labels differ only in the edge id below their ancestor.
-  sig <- paste(c(purrr::map_chr(anc[seq_len(k)], anc_signature), ref),
-               collapse = "\u001e")
-  list(kind = kinds[[k]], anc_id = as.character(a$id %||% ""), sig = sig, ref = ref,
-       hand_drawn = "rough-node" %in% class_tokens(a$cls) ||
-         identical(a$data$look, "handDrawn"))
-}
-
 #' The unit of every piece, as a tibble aligned with `pieces`
 #'
-#' A unit is a run of consecutive pieces under the same unit ancestor (the
-#' DOM keeps a group's descendants together); every edge path is a unit of
-#' its own.
+#' A unit is a run of consecutive pieces under the same unit element (the
+#' DOM keeps an element's descendants together); a prim that is a unit is a
+#' unit of its own.
 #' @noRd
-piece_units <- function(pieces, nodes) {
-  dom_ids <- nodes$dom_id[!nodes$is_group & !is.na(nodes$dom_id)]
-  info <- purrr::pmap(
-    list(pieces$i, pieces$src == "path", pieces$id, pieces$data, pieces$anc),
-    piece_unit, node_dom_ids = dom_ids
-  )
-  # Marker shapes follow their edge into its unit; they come right after it,
-  # so they join its run.
-  host <- marker_host(pieces)
-  follows <- which(!is.na(host))
-  info[follows] <- info[host[follows]]
-  u <- tibble::tibble(
-    kind = purrr::map_chr(info, "kind"), anc_id = purrr::map_chr(info, "anc_id"),
-    sig = purrr::map_chr(info, "sig"), ref = purrr::map_chr(info, "ref"),
-    hand_drawn = purrr::map_lgl(info, "hand_drawn")
-  )
+piece_units <- function(pieces) {
+  info <- purrr::pmap(list(pieces$i, pieces$unit, pieces$anc), piece_unit)
+  field <- function(name) purrr::map_chr(info, name)
+  u <- quick_tibble(kind = field("kind"), id = field("id"), start = field("start"),
+                    end = field("end"), sig = field("sig"),
+                    hand_drawn = purrr::map_lgl(info, "hand_drawn"))
   n <- nrow(u)
   run <- cumsum(c(TRUE, u$sig[-1L] != u$sig[-n]))[seq_len(n)]
   u$key <- ifelse(is.na(u$kind), NA_character_, paste0("u", run))
   u
 }
 
-#' One row per unit: its kind, paint position, resolved id and name, and what
-#' the db says about it
-#'
-#' Nodes and subgraphs join `db$nodes` on `domId`, then on `id` (groups,
-#' and ER, kanban and requirement nodes, have no `domId` in the DOM); with no
-#' match the id is the DOM id without Mermaid's `flowchart-` prefix and `-<n>`
-#' suffix. Edges and edge labels join `db$edges` through their edge id.
+#' One row per unit: its kind, paint position, id, ends and name, and what
+#' the db says about it (nodes and subgraphs, by their id)
 #' @noRd
-unit_table <- function(pu, pos, nodes, edges) {
+unit_table <- function(pu, pos, nodes) {
   keyed <- !is.na(pu$key)
   first <- !duplicated(pu$key) & keyed
-  u <- pu[first, c("key", "kind", "anc_id", "ref")]
+  u <- pu[first, c("key", "kind", "id", "start", "end")]
   u$pos <- pos[first]
-  u$hand_drawn <- purrr::map_lgl(u$key, function(k) any(pu$hand_drawn[pu$key %in% k]))
-
-  on_dom <- match_key(u$anc_id, nodes$dom_id)
-  node_row <- ifelse(is.na(on_dom), match_key(u$anc_id, nodes$id), on_dom)
+  hand_drawn <- tapply(pu$hand_drawn[keyed], pu$key[keyed], any)
+  node_row <- match(u$id, nodes$id, incomparables = NA)
   node_row[!u$kind %in% c("node", "subgraph")] <- NA_integer_
-  edge_row <- match_edge(u$ref, edges)
-  edge_row[!u$kind %in% c("edge", "edge_label")] <- NA_integer_
-
-  u$id <- ifelse(is.na(node_row), clean_unit_id(u$anc_id), nodes$id[node_row])
   u$shape <- nodes$shape[node_row]
   u$parent <- nodes$parent[node_row]
-  u$hand_drawn <- u$hand_drawn | nodes$look[node_row] %in% "handDrawn"
-  u$start <- edges$start[edge_row]
-  u$end <- edges$end[edge_row]
-  u$name <- unit_names(u)
+  u$hand_drawn <- unname(hand_drawn[u$key]) | nodes$look[node_row] %in% "handDrawn"
+  u$name <- mermaid_name(u$kind, unit_tag(u))
   u
 }
 
-# mermaid:node:<id>, mermaid:subgraph:<id>, mermaid:edge:<start>-<end>,
-# mermaid:edge_label:<start>:<end>; an edge the db does not know is named
-# after its edge id.
-unit_names <- function(u) {
+# A unit's name tag: an edge is <start>-<end>, its label <start>:<end>, and
+# anything else, or an edge whose ends are unknown, its id.
+unit_tag <- function(u) {
   known <- !is.na(u$start) & !is.na(u$end)
-  edge_tag <- ifelse(known, paste0(u$start, "-", u$end), u$ref)
-  label_tag <- ifelse(known, paste0(u$start, ":", u$end), u$ref)
-  tag <- ifelse(u$kind == "edge", edge_tag,
-                ifelse(u$kind == "edge_label", label_tag, u$id))
-  prefix <- paste0("mermaid:", u$kind)
-  ifelse(!is.na(tag) & nzchar(tag), paste0(prefix, ":", tag), prefix)
+  joint <- c(edge = "-", edge_label = ":")[u$kind]
+  ifelse(known & !is.na(joint), paste0(u$start, joint, u$end), u$id)
 }
 
 # ---- registered nodes --------------------------------------------------------
@@ -318,7 +246,7 @@ unit_names <- function(u) {
 # Points that outline a piece: its path's end points, or its box corners.
 piece_points <- function(path, x, y, w, h) {
   if (is.null(path)) {
-    return(tibble::tibble(x = c(x, x + w, x + w, x), y = c(y, y, y + h, y + h)))
+    return(quick_tibble(x = c(x, x + w, x + w, x), y = c(y, y, y + h, y + h)))
   }
   path[path$cmd != "Z", c("x", "y")]
 }
@@ -327,7 +255,7 @@ piece_points <- function(path, x, y, w, h) {
 # adjust: the largest gap between the box side and the outline along its top
 # and bottom edges, over the shorter box side.
 inset_adj <- function(pts, box) {
-  tol <- max(1, 0.05 * box[[4]])
+  tol <- max(.tolerance$inset_px, .tolerance$inset_rel * box[[4]])
   top <- pts$x[pts$y <= box[[2]] + tol]
   bottom <- pts$x[pts$y >= box[[2]] + box[[4]] - tol]
   if (length(top) == 0L || length(bottom) == 0L || min(box[[3]], box[[4]]) <= 0) {
@@ -382,7 +310,7 @@ registered_item <- function(pu, reg, hand_drawn, name) {
   texts <- pu[pu$kind == "text", ]
   text <- if (nrow(texts) > 0L) place_text(combine_texts(texts$text), box)
 
-  tibble::tibble(
+  quick_tibble(
     name = name, kind = "shape", parent = NA_character_,
     x = box[[1]], y = box[[2]], w = box[[3]], h = box[[4]], rot = 0,
     prst = prst,
@@ -398,7 +326,7 @@ registered_item <- function(pu, reg, hand_drawn, name) {
     path = list(NULL), closed = TRUE,
     dash = list(if (is.na(stroke_from)) NULL else shapes$dash[[stroke_from]]),
     text = list(text),
-    head_len = "med", head_w = "med", tail_len = "med", tail_w = "med"
+    head_len = "med", head_w = "med", tail_len = "med", tail_w = "med", depth = 0L
   )
 }
 
@@ -407,214 +335,7 @@ registered_item <- function(pu, reg, hand_drawn, name) {
 
 registry_row <- function(shape) {
   reg <- .shape_registry
-  hit <- match_key(shape, reg$shape)
+  hit <- match(shape, reg$shape, incomparables = NA)
   if (is.na(hit)) NULL else reg[hit, ]
 }
 
-# ---- blocks: units and loose items, before nesting -----------------------------
-#
-# A block is what gets placed at one level of the group tree: a unit's items,
-# one loose item, or a subgraph (whose `items` are its background and whose
-# members are the blocks with member_of == its id).
-
-new_blocks <- function(kind, pos, items, gid = NA_character_,
-                       member_of = NA_character_, start = NA_character_,
-                       end = NA_character_, parent = NA_character_) {
-  tibble::tibble(kind = kind, pos = pos, items = items, gid = gid,
-                 member_of = member_of, start = start, end = end, parent = parent)
-}
-
-#' Items of a unit under one name: a single item takes it, several are
-#' grouped under it
-#' @noRd
-name_unit <- function(items, name) {
-  if (nrow(items) == 0L) return(items)
-  if (nrow(items) == 1L) {
-    items$name <- name
-    return(items)
-  }
-  group_under(items, name)
-}
-
-# Each row of folded pieces as a block of its own.
-loose_blocks <- function(folded, member_of = NA_character_) {
-  if (nrow(folded) == 0L) return(new_blocks(character(), numeric(), list()))
-  new_blocks("loose", folded$pos, unname(split(to_items(folded), seq_len(nrow(folded)))),
-             member_of = member_of)
-}
-
-unit_blocks_node <- function(u, pu) {
-  reg <- registry_row(u$shape)
-  drawn <- any(pu$kind %in% c("shape", "line") & !pu$html)
-  items <- if (!is.null(reg) && drawn) {
-    registered_item(pu, reg, u$hand_drawn, u$name)
-  } else {
-    name_unit(to_items(fold_pieces(pu)), u$name)
-  }
-  new_blocks("node", u$pos, list(items), parent = u$parent)
-}
-
-# A subgraph block holds only its background, so that its other parts (a
-# title with no rect behind it, a state's inner box) take their paint order
-# among the subgraph's members.
-unit_blocks_subgraph <- function(u, pu) {
-  reg <- registry_row(u$shape)
-  bg_name <- paste0("mermaid:subgraph_bg:", u$id)
-  drawn <- any(pu$kind %in% c("shape", "line") & !pu$html)
-  if (!is.null(reg) && drawn) {
-    bg <- registered_item(pu, reg, u$hand_drawn, bg_name)
-    rest <- loose_blocks(pu[0, ])
-  } else {
-    folded <- fold_pieces(pu)
-    first_shape <- match("shape", folded$kind)
-    bg <- if (is.na(first_shape)) empty_items() else
-      to_items(with_name(folded[first_shape, ], bg_name))
-    rest <- loose_blocks(if (is.na(first_shape)) folded else folded[-first_shape, ],
-                         member_of = u$id)
-  }
-  purrr::list_rbind(list(
-    new_blocks("subgraph", u$pos, list(bg), gid = u$id, parent = u$parent),
-    rest
-  ))
-}
-
-with_name <- function(p, name) {
-  p$name <- name
-  p
-}
-
-# Edges are never filled and keep their exact path, even a rectangular one.
-# An edge with marker shapes is grouped with them (spec C3).
-unit_blocks_edge <- function(u, pu) {
-  marks <- !is.na(pu$marker_of)
-  edge <- pu[!marks, ]
-  edge$fill <- NA_character_
-  edge$fill_a <- 0
-  edge$prst[edge$kind != "line"] <- NA_character_
-  edge$closed <- purrr::map_lgl(edge$path, function(p) !is.null(p) && path_closed(p))
-  edge$name <- u$name
-  items <- to_items(edge)
-  if (any(marks)) {
-    items <- group_under(purrr::list_rbind(list(items, to_items(pu[marks, ]))),
-                         sub("^mermaid:edge", "mermaid:edge_group", u$name))
-  }
-  new_blocks("edge", u$pos, list(items), start = u$start, end = u$end)
-}
-
-unit_blocks_edge_label <- function(u, pu) {
-  new_blocks("edge_label", u$pos, list(name_unit(to_items(fold_pieces(pu)), u$name)),
-             start = u$start, end = u$end)
-}
-
-.unit_builders <- list(
-  node = unit_blocks_node, subgraph = unit_blocks_subgraph,
-  edge = unit_blocks_edge, edge_label = unit_blocks_edge_label
-)
-
-# ---- membership and nesting ----------------------------------------------------
-
-# The groups above `id`, nearest first (not `id` itself).
-group_chain <- function(id, parent_of, seen = character()) {
-  if (is.na(id)) return(character())
-  up <- unname(parent_of[id])
-  if (is.na(up) || up %in% seen) return(character())
-  c(up, group_chain(up, parent_of, c(seen, up)))
-}
-
-# The deepest group holding both ends of an edge.
-deepest_common <- function(start, end, parent_of) {
-  common <- intersect(group_chain(start, parent_of), group_chain(end, parent_of))
-  if (length(common) == 0L) NA_character_ else common[[1]]
-}
-
-#' With a db: nodes and subgraphs sit in their db parent, edges and their
-#' labels in the deepest subgraph holding both ends
-#' @noRd
-db_membership <- function(blocks, nodes) {
-  groups <- nodes$id[nodes$is_group]
-  parent_of <- stats::setNames(nodes$parent, nodes$id)
-  by_parent <- blocks$kind %in% c("node", "subgraph") & blocks$parent %in% groups
-  blocks$member_of[by_parent] <- blocks$parent[by_parent]
-  linked <- blocks$kind %in% c("edge", "edge_label")
-  blocks$member_of[linked] <- purrr::map2_chr(blocks$start[linked], blocks$end[linked],
-                                              deepest_common, parent_of = parent_of)
-  blocks
-}
-
-#' Without a db: each unit sits in the smallest subgraph background holding
-#' its centre
-#' @noRd
-box_membership <- function(blocks) {
-  bg <- purrr::map(blocks$items, drawn_box)
-  is_cluster <- blocks$kind == "subgraph" & purrr::map_lgl(blocks$items, function(it) nrow(it) > 0L)
-  cb <- do.call(rbind, c(list(matrix(numeric(), 0L, 4L)), bg[is_cluster]))
-  cluster_ids <- blocks$gid[is_cluster]
-  area <- cb[, 3] * cb[, 4]
-  inside_of <- function(box, kind) {
-    cx <- box[[1]] + box[[3]] / 2
-    cy <- box[[2]] + box[[4]] / 2
-    own <- if (kind == "subgraph") box[[3]] * box[[4]] else -Inf
-    ok <- which(cb[, 1] <= cx & cx <= cb[, 1] + cb[, 3] &
-                  cb[, 2] <= cy & cy <= cb[, 2] + cb[, 4] & area > own)
-    if (length(ok) == 0L) NA_character_ else cluster_ids[[ok[[which.min(area[ok])]]]]
-  }
-  open <- is.na(blocks$member_of) & blocks$kind != "loose" &
-    !purrr::map_lgl(bg, anyNA)
-  blocks$member_of[open] <- purrr::map2_chr(bg[open], blocks$kind[open], inside_of)
-  blocks
-}
-
-# db groups that hold members but were not drawn (no cluster in the DOM)
-# still group them.
-add_undrawn_groups <- function(blocks, parent_of) {
-  missing <- setdiff(stats::na.omit(blocks$member_of), stats::na.omit(blocks$gid))
-  if (length(missing) == 0L) return(blocks)
-  first_pos <- purrr::map_dbl(missing, function(g) min(blocks$pos[blocks$member_of %in% g]))
-  added <- new_blocks("subgraph", first_pos, rep(list(empty_items()), length(missing)),
-                      gid = missing, member_of = unname(parent_of[missing]))
-  add_undrawn_groups(purrr::list_rbind(list(blocks, added)), parent_of)
-}
-
-# The rows of one level of the group tree (group `gid`, NA for the top), in
-# paint order, each subgraph followed by its background and members.
-nest_level <- function(gid, gname, blocks, seen = character()) {
-  here <- if (is.na(gid)) is.na(blocks$member_of) else blocks$member_of %in% gid
-  level <- blocks[here, ]
-  level <- level[order(level$pos), ]
-  rows <- purrr::pmap(list(level$kind, level$gid, level$items), function(kind, g, items) {
-    if (kind != "subgraph") return(reparent(items, gname))
-    if (g %in% seen) return(empty_items())
-    name <- paste0("mermaid:subgraph:", g)
-    inner <- purrr::list_rbind(list(reparent(items, name),
-                                    nest_level(g, name, blocks, c(seen, g))))
-    if (nrow(inner) == 0L) return(empty_items())
-    purrr::list_rbind(list(group_item(name, gname, drawn_box(inner)), inner))
-  })
-  purrr::list_rbind(c(list(empty_items()), rows))
-}
-
-#' Scene items from pieces: units assembled by their rules, everything else
-#' by the generic ones (and grouped by scope), nested into subgraph groups
-#' @noRd
-scene_items <- function(pieces, db) {
-  nodes <- db_node_table(db)
-  edges <- db_edge_table(db)
-  pu <- piece_units(pieces, nodes)
-  units <- unit_table(pu, pieces$pos, nodes, edges)
-
-  in_unit <- !is.na(pu$key)
-  by_unit <- split(pieces[in_unit, ], factor(pu$key[in_unit], levels = units$key))
-  unit_rows <- split(units, seq_len(nrow(units)))
-  loose <- scope_blocks(fold_pieces(pieces[!in_unit, ]),
-                        union_box(pieces$x, pieces$y, pieces$w, pieces$h))
-  blocks <- purrr::list_rbind(c(
-    list(new_blocks(character(), numeric(), list())),
-    purrr::map2(unit_rows, by_unit, function(u, p) .unit_builders[[u$kind]](u, p)),
-    list(new_blocks(rep("loose", length(loose$pos)), loose$pos, loose$items))
-  ))
-
-  has_db <- nrow(nodes) > 0L
-  blocks <- if (has_db) db_membership(blocks, nodes) else box_membership(blocks)
-  blocks <- add_undrawn_groups(blocks, stats::setNames(nodes$parent, nodes$id))
-  unique_group_names(nest_level(NA_character_, NA_character_, blocks))
-}

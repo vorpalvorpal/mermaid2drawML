@@ -34,7 +34,7 @@
     unname(Sys.which(c("google-chrome", "chromium", "chromium-browser"))))
 }
 
-#' Render a Mermaid diagram in a headless browser
+#' Render Mermaid diagrams in a headless browser
 #'
 #' Runs the package's Node bridge (`inst/node/mermaid_bridge.js`), which has
 #' Mermaid draw the diagram in headless Chrome and reports what the browser
@@ -42,30 +42,44 @@
 #' own node and edge data. The bridge is run from the installed package, so it
 #' always matches the R code reading its output.
 #'
-#' @param mermaid_code Character. Mermaid source; a vector of lines is joined
-#'   with newlines.
+#' Starting Node and Chrome is most of the time a render takes, so several
+#' diagrams are best rendered in one call: give `mermaid_code` as a list.
+#'
+#' @param mermaid_code Mermaid source: a character vector, whose lines are
+#'   joined with newlines into one diagram; or a list of such vectors, each
+#'   rendered as its own diagram in one run of the bridge.
 #' @param timeout Seconds the whole render may take, Node and Chrome start-up
 #'   included; Chrome can be slow to start the first time. The bridge is
 #'   given this less a start-up allowance (never under 5 seconds) as its own
-#'   limit for the page.
+#'   limit for each page.
 #' @param config `NULL`, or a named list of Mermaid configuration (for example
 #'   `list(theme = "forest")`), written as JSON and given to the bridge.
-#' @return An object of class `mermaid_render`: a list with `type`, `role`,
-#'   `viewBox` (numeric, length 4), `title`, `desc`, `svg`, `prims` (the drawn
+#' @param svg Logical. `TRUE` also returns the SVG text Mermaid drew, in the
+#'   `svg` field, to look at when a conversion seems wrong. Default `FALSE`:
+#'   the conversion never needs it, and it can be large.
+#' @return For a character vector, an object of class `mermaid_render`: a
+#'   list with `type`, `role`, `viewBox` (numeric, length 4), `title`,
+#'   `desc`, `svg` (`NULL` unless `svg = TRUE`), `prims` (the drawn
 #'   primitives), `markers` (the line-end markers the primitives use, by id),
 #'   `db` (Mermaid's node and edge data, or `NULL`) and `mermaid` (the
-#'   Mermaid version).
+#'   Mermaid version). For a list, a list of the same length holding one
+#'   `mermaid_render` per diagram, in order; a diagram that failed holds the
+#'   error condition it would have raised on its own instead.
 #' @section Errors:
 #' A diagram Mermaid cannot parse or draw is an error of class
-#' `mermaid2drawml_syntax_error`; a render that runs out of time is
-#' `mermaid2drawml_timeout`; any other failure of the bridge or the browser
-#' is `mermaid2drawml_render_error`.
+#' `mermaid2drawml_syntax_error`, with Mermaid's own message in its
+#' `mermaid_message` field; a render that runs out of time is
+#' `mermaid2drawml_timeout`, with the `timeout` (seconds) in its field of
+#' that name; any other failure of the bridge or the browser is
+#' `mermaid2drawml_render_error`. With a list, a failure of the whole run
+#' (Node or Chrome failing, the run timing out) is still raised.
 #' @export
-render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL) {
+render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL, svg = FALSE) {
   check_mermaid2drawml()
-
-  mmd <- withr::local_tempfile(fileext = ".mmd")
-  writeLines(enc2utf8(paste(mermaid_code, collapse = "\n")), mmd, useBytes = TRUE)
+  several <- is.list(mermaid_code)
+  if (several && length(mermaid_code) == 0L) return(list())
+  codes <- if (several) mermaid_code else list(mermaid_code)
+  inputs <- purrr::map_chr(codes, write_mermaid_file, frame = environment())
 
   config_args <- if (length(config) > 0L) {
     cfg <- withr::local_tempfile(fileext = ".json")
@@ -80,7 +94,8 @@ render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL) {
   result <- processx::run(
     "node",
     c(system.file("node", "mermaid_bridge.js", package = "mermaid2drawml"),
-      "--timeout", bridge_timeout_ms(timeout), config_args, mmd),
+      "--timeout", bridge_timeout_ms(timeout), config_args, if (isTRUE(svg)) "--svg",
+      inputs),
     env = c("current",
             M2D_NODE_DIR = .node_dir(),
             if (!is.na(browser)) c(PUPPETEER_EXECUTABLE_PATH = browser)),
@@ -90,7 +105,21 @@ render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL) {
     error_on_status = FALSE
   )
 
-  as_mermaid_render(parse_bridge_output(result, timeout))
+  results <- parse_bridge_output(result, timeout, length(inputs))
+  if (!several) return(bridge_render(results[[1]], timeout))
+  purrr::map(results, function(r) {
+    tryCatch(bridge_render(r, timeout),
+             mermaid2drawml_syntax_error = identity,
+             mermaid2drawml_timeout = identity,
+             mermaid2drawml_render_error = identity)
+  })
+}
+
+# One diagram's source in a temporary file that lasts as long as `frame`.
+write_mermaid_file <- function(code, frame) {
+  mmd <- withr::local_tempfile(fileext = ".mmd", .local_envir = frame)
+  writeLines(enc2utf8(paste(code, collapse = "\n")), mmd, useBytes = TRUE)
+  mmd
 }
 
 # Time (s) Node and Chrome need to start before the page's own limit applies.
@@ -108,18 +137,21 @@ bridge_timeout_ms <- function(timeout) {
                       timeout = "mermaid2drawml_timeout",
                       bridge = "mermaid2drawml_render_error")
 
-failure_class <- function(kind) {
-  unname(.failure_classes[[if (is.character(kind) && kind %in% names(.failure_classes)) kind else "syntax"]])
+failure_kind <- function(kind) {
+  if (is.character(kind) && length(kind) == 1L && kind %in% names(.failure_classes)) kind else "syntax"
 }
 
-# The bridge prints a JSON array with one result per input; we send one input.
-# A failed diagram is a normal result (`ok: false`) with an error kind.
-parse_bridge_output <- function(result, timeout) {
+#' The results of one bridge run, one per input
+#'
+#' The bridge prints a JSON array with one result per input, in input order.
+#' A failed diagram is a normal result (`ok: false`) with an error kind; a
+#' failure of the run itself is raised here.
+#' @param n The number of inputs.
+#' @noRd
+parse_bridge_output <- function(result, timeout, n = 1L) {
   if (isTRUE(result$timeout)) {
-    cli::cli_abort(
-      "Rendering did not finish within {timeout} second{?s}.",
-      class = "mermaid2drawml_timeout"
-    )
+    cli::cli_abort("Rendering did not finish within {timeout} second{?s}.",
+                   class = "mermaid2drawml_timeout", timeout = timeout)
   }
   if (!identical(as.integer(result$status), 0L)) {
     cli::cli_abort(
@@ -142,20 +174,37 @@ parse_bridge_output <- function(result, timeout) {
       )
     }
   )
-  # A well-formed array holds exactly the one result we asked for.
-  first <- if (is.list(out) && is.null(names(out)) && length(out) > 0L) out[[1]] else out
-  if (is.list(first) && identical(first$ok, FALSE)) {
+  # A single result object, not in an array, is taken as the array of it.
+  results <- if (is.list(out) && is.null(names(out))) out else list(out)
+  if (length(results) < n) {
     cli::cli_abort(
-      c("Mermaid could not render the diagram.", x = "{first$error$message}"),
-      class = failure_class(first$error$kind)
+      "The Mermaid bridge returned {length(results)} result{?s} for {n} diagram{?s}.",
+      class = "mermaid2drawml_render_error"
     )
   }
-  first
+  results[seq_len(n)]
+}
+
+#' One bridge result as a `mermaid_render`, or the error its failure is
+#' @noRd
+bridge_render <- function(x, timeout, call = rlang::caller_env()) {
+  if (is.list(x) && identical(x$ok, FALSE)) {
+    kind <- failure_kind(x$error$kind)
+    message <- as.character(x$error$message %||% "")
+    if (kind == "timeout") {
+      cli::cli_abort(c("Mermaid could not render the diagram in time.", x = "{message}"),
+                     class = "mermaid2drawml_timeout", timeout = timeout,
+                     mermaid_message = message, call = call)
+    }
+    cli::cli_abort(c("Mermaid could not render the diagram.", x = "{message}"),
+                   class = .failure_classes[[kind]], mermaid_message = message, call = call)
+  }
+  as_mermaid_render(x)
 }
 
 #' Read one bridge result from a JSON file
 #'
-#' For fixtures written by `dev/make-fixtures.mjs`, which omit `svg`.
+#' For fixtures written by `dev/make-fixtures.mjs` (without `svg`).
 #' @param path Path to a JSON file holding one bridge result object.
 #' @noRd
 read_render <- function(path) {

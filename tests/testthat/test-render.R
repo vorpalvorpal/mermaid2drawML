@@ -231,6 +231,12 @@ fake_node_dir <- function(mermaid = pinned_versions()$mermaid,
   dir <- withr::local_tempdir(.local_envir = env)
   if (!is.null(mermaid)) write_pkg_version(dir, "mermaid", mermaid)
   if (!is.null(cli)) write_pkg_version(dir, "@mermaid-js/mermaid-cli", cli)
+  # Every other pinned package (the icon packs) at its pinned version, so
+  # that only the two above decide the check.
+  pins <- jsonlite::fromJSON(system.file("node", "package.json",
+                                         package = "mermaid2drawml"))$dependencies
+  others <- setdiff(names(pins), c("mermaid", "@mermaid-js/mermaid-cli"))
+  for (pkg in others) write_pkg_version(dir, pkg, pins[[pkg]])
   dir
 }
 

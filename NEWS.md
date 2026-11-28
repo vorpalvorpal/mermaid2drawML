@@ -42,7 +42,15 @@
 * Titles and other centred labels stay centred when edited in Word; member
   lists stay left-aligned.
 
-* Building the scene is about 3.5 times faster.
+* Building the scene is about 3.5 times faster, and large diagrams are no
+  longer slow: no step takes time that grows with the square of the number
+  of shapes or groups (a diagram of 2000 grouped marks took over two minutes
+  and now takes seconds). Writing the DrawingML is about twice as fast.
+
+* Which part of the drawing is which node, subgraph, edge or edge label now
+  comes from Mermaid's own data, matched in the browser, instead of being
+  guessed from class names and element ids. Diagram types without node and
+  edge data (block, sankey) are drawn as loose, scope-grouped shapes.
 
 * Cylinders have their true height. The horizontal (`h-cyl`) and lined
   (`lin-cyl`) cylinders are no longer swapped.
@@ -85,6 +93,26 @@
 * `render_mermaid(timeout = )` limits the whole render; the bridge's own
   limit for the page is that less a start-up allowance (at least 5 seconds).
 
+* Several diagrams render in one launch of Node and Chrome, which is most of
+  the time a render takes: give `render_mermaid()` or `mermaid_to_word()` a
+  list of sources (a character vector is still one diagram). They return a
+  list; a diagram that fails holds its error condition in its slot, and
+  `mermaid_to_word()` numbers each diagram's shapes on from the previous
+  one's `next_id`.
+
+* `mermaid_to_word()` and `body_add_mermaid()` take `max_scale`,
+  `page_width_in` and `page_height_in` as named arguments (they were passed
+  through `...` before, which still works by name).
+
+* The package's conditions carry their data as fields:
+  `mermaid2drawml_unsupported` has `tags`, `mermaid2drawml_small_text` has
+  `points`, `mermaid2drawml_syntax_error` has `mermaid_message` (Mermaid's
+  own text) and `mermaid2drawml_timeout` has `timeout` (seconds).
+
+* `render_mermaid()` no longer returns the SVG text unless asked:
+  `render_mermaid(svg = TRUE)` keeps it in `svg`, for looking at a diagram
+  whose conversion seems wrong.
+
 * An empty `mermaid_config` sends no configuration; `NULL` members are kept
   as JSON `null`, and numbers keep their full precision.
 
@@ -109,7 +137,9 @@
   section first.
 
 * `orientation = "auto"` turns the page landscape only when the diagram is
-  wide and also too wide for a portrait page at its drawn size.
+  wide and also too wide for a portrait page at the size it is drawn
+  (`max_scale` included). With `page_width_in` or `page_height_in` given,
+  the diagram is fitted to that space and the page stays portrait.
 
 * `page_margins_in` is validated; a bad value is an error instead of being
   silently ignored.

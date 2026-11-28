@@ -11,13 +11,13 @@
 #' Apply an affine matrix to points
 #' @param m Numeric length 6.
 #' @param x,y Numeric vectors of the same length.
-#' @return A tibble with columns `x` and `y`.
+#' @return A list with numeric `x` and `y`. A plain list, because it is made
+#'   for every point set of every prim and a data frame's checks cost more
+#'   than the arithmetic.
 #' @noRd
 mat_apply <- function(m, x, y) {
-  # Both results are computed from the inputs before tibble() can shadow `x`.
-  new_x <- m[[1]] * x + m[[3]] * y + m[[5]]
-  new_y <- m[[2]] * x + m[[4]] * y + m[[6]]
-  tibble::tibble(x = new_x, y = new_y)
+  list(x = m[[1]] * x + m[[3]] * y + m[[5]],
+       y = m[[2]] * x + m[[4]] * y + m[[6]])
 }
 
 #' Uniform scale factor of a matrix (square root of the absolute determinant)
@@ -70,9 +70,11 @@ path_tbl <- function(cmd = character(), x1 = NA_real_, y1 = NA_real_,
                      x = NA_real_, y = NA_real_) {
   n <- length(cmd)
   rep_n <- function(v) if (n == 0L) numeric() else rep_len(as.numeric(v), n)
-  tibble::tibble(cmd = cmd, x1 = rep_n(x1), y1 = rep_n(y1),
-                 x2 = rep_n(x2), y2 = rep_n(y2),
-                 x = rep_n(x), y = rep_n(y))
+  # new_tibble(): paths are made for every prim, and tibble()'s checks cost
+  # more than building the columns.
+  tibble::new_tibble(list(cmd = as.character(cmd), x1 = rep_n(x1), y1 = rep_n(y1),
+                          x2 = rep_n(x2), y2 = rep_n(y2), x = rep_n(x), y = rep_n(y)),
+                     nrow = n)
 }
 
 #' Build a path from a list of points
@@ -333,9 +335,8 @@ path_walk <- function(ops, args, start) {
     cy <- ctrl[[2]]
   }
   keep <- seq_len(j)
-  tibble::tibble(cmd = cmd[keep], x1 = seg[keep, 1], y1 = seg[keep, 2],
-                 x2 = seg[keep, 3], y2 = seg[keep, 4], x = seg[keep, 5],
-                 y = seg[keep, 6])
+  path_tbl(cmd[keep], x1 = seg[keep, 1], y1 = seg[keep, 2], x2 = seg[keep, 3],
+           y2 = seg[keep, 4], x = seg[keep, 5], y = seg[keep, 6])
 }
 
 #' Parse SVG path data into absolute M, L, C and Z segments
@@ -540,9 +541,9 @@ path_segments <- function(path) {
   y0 <- c(NA_real_, utils::head(ends$y, -1L))
   is_c <- path$cmd == "C"
   mid <- function(p0, p1, p2, p3) ifelse(is_c, (p0 + 3 * p1 + 3 * p2 + p3) / 8, (p0 + p3) / 2)
-  seg <- tibble::tibble(cmd = path$cmd, x0 = x0, y0 = y0, x = ends$x, y = ends$y,
-                        mx = mid(x0, path$x1, path$x2, ends$x),
-                        my = mid(y0, path$y1, path$y2, ends$y))
+  seg <- vctrs::new_data_frame(list(cmd = path$cmd, x0 = x0, y0 = y0, x = ends$x, y = ends$y,
+                                     mx = mid(x0, path$x1, path$x2, ends$x),
+                                     my = mid(y0, path$y1, path$y2, ends$y)))
   gap <- abs(seg$x - seg$x0) + abs(seg$y - seg$y0)
   seg[seg$cmd != "M" & !(seg$cmd == "Z" & gap <= 1e-9), ]
 }
@@ -624,7 +625,7 @@ path_corner_radius <- function(path, box, tol) {
 path_points <- function(path) {
   seg <- path_segments(path)
   starts <- path[path$cmd == "M", c("x", "y")]
-  tibble::tibble(x = c(starts$x, seg$x, seg$mx), y = c(starts$y, seg$y, seg$my))
+  vctrs::new_data_frame(list(x = c(starts$x, seg$x, seg$mx), y = c(starts$y, seg$y, seg$my)))
 }
 
 # Distance of points from the boundary of box c(x, y, w, h).

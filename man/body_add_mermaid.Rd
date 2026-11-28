@@ -13,14 +13,17 @@ body_add_mermaid(
   auto_aspect = 1.3,
   page_margins_in = NULL,
   mermaid_config = NULL,
+  max_scale = 1,
+  page_width_in = NULL,
+  page_height_in = NULL,
   ...
 )
 }
 \arguments{
 \item{doc}{An \code{rdocx} object from \code{\link[officer:read_docx]{officer::read_docx()}}.}
 
-\item{mermaid_code}{Character. Mermaid source; a vector of lines is joined
-with newlines.}
+\item{mermaid_code}{Character. Mermaid source of one diagram; a vector of
+lines is joined with newlines.}
 
 \item{start_id}{Integer. Id of the drawing. Default \code{NULL}, meaning one more
 than the largest id already used by a \code{wp:docPr} or any \code{cNvPr} in the
@@ -32,8 +35,10 @@ never produce duplicate ids. An explicit value is used as given.}
 \item{orientation}{Page orientation for the output document: \code{"portrait"},
 \code{"landscape"}, or \code{"auto"} (default). Auto chooses landscape only when the
 diagram is wider than \code{auto_aspect} (width/height) \strong{and} would not fit
-the portrait content width at its drawn size (its width at 96 px per inch,
-times \code{max_scale}). A small wide diagram therefore stays portrait.}
+the portrait content width at the size it is drawn (its width at 96 px
+per inch, times \code{max_scale}). A small wide diagram therefore stays
+portrait. With \code{page_width_in} or \code{page_height_in} given there is
+nothing to decide: auto is portrait, fitted to that space.}
 
 \item{auto_aspect}{Numeric. Aspect-ratio threshold used when
 \code{orientation = "auto"}. Diagrams wider than this ratio are landscape.
@@ -49,15 +54,20 @@ physical page is available for the diagram. Can be:
 }
 The content area is computed from an A4 page (8.27" x 11.69" portrait,
 11.69" x 8.27" landscape) minus the supplied margins. For other sizes
-pass \code{page_width_in} / \code{page_height_in} directly via \code{...}.}
+give \code{page_width_in} / \code{page_height_in}.}
 
 \item{mermaid_config}{\code{NULL}, or a named list of Mermaid configuration,
 for example \code{list(theme = "forest")}; see \code{\link[=render_mermaid]{render_mermaid()}}.}
 
-\item{...}{Arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}, e.g. \code{max_scale}
-(default \code{1}: a diagram is drawn at natural size at most; \code{Inf} fills the
-page), \code{font_scale}, \code{word_font_family}, \code{align}, \code{min_stroke_pt},
-\code{alt_text}. The drawing
+\item{max_scale}{Numeric. Largest size, as a multiple of Mermaid's own:
+the default \code{1} never enlarges a small diagram; \code{Inf} fills the page.}
+
+\item{page_width_in, page_height_in}{Numeric or \code{NULL}. The space, in
+inches, the diagram may fill. \code{NULL} (default): the content area of the
+page the orientation and margins give.}
+
+\item{...}{Other arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}: \code{font_scale},
+\code{word_font_family}, \code{align}, \code{min_stroke_pt}, \code{alt_text}. The drawing
 is placed in line with the text, in its own paragraph.}
 }
 \value{

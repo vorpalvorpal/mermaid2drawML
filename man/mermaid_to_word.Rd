@@ -12,25 +12,33 @@ mermaid_to_word(
   auto_aspect = 1.3,
   page_margins_in = NULL,
   mermaid_config = NULL,
+  max_scale = 1,
+  page_width_in = NULL,
+  page_height_in = NULL,
   ...
 )
 }
 \arguments{
-\item{mermaid_code}{Character. Mermaid source; a vector of lines is joined
-with newlines.}
+\item{mermaid_code}{Mermaid source: a character vector, whose lines are
+joined with newlines into one diagram; or a list of such vectors, which
+are rendered in one run of the browser (much faster than one call each)
+and give a list of diagrams.}
 
 \item{start_id}{Integer. Id of the drawing; its shapes take the following
 ids. Increment between diagrams in the same document to avoid id
 collisions (see \code{\link[=body_add_mermaid]{body_add_mermaid()}}, which picks a free one
-automatically). Default \code{1L}.}
+automatically). For a list, the first diagram's id; each next diagram
+starts at the previous one's \code{next_id}. Default \code{1L}.}
 
 \item{timeout}{Integer. Seconds to allow for the Node.js render. Default 120.}
 
 \item{orientation}{Page orientation for the output document: \code{"portrait"},
 \code{"landscape"}, or \code{"auto"} (default). Auto chooses landscape only when the
 diagram is wider than \code{auto_aspect} (width/height) \strong{and} would not fit
-the portrait content width at its drawn size (its width at 96 px per inch,
-times \code{max_scale}). A small wide diagram therefore stays portrait.}
+the portrait content width at the size it is drawn (its width at 96 px
+per inch, times \code{max_scale}). A small wide diagram therefore stays
+portrait. With \code{page_width_in} or \code{page_height_in} given there is
+nothing to decide: auto is portrait, fitted to that space.}
 
 \item{auto_aspect}{Numeric. Aspect-ratio threshold used when
 \code{orientation = "auto"}. Diagrams wider than this ratio are landscape.
@@ -46,16 +54,20 @@ physical page is available for the diagram. Can be:
 }
 The content area is computed from an A4 page (8.27" x 11.69" portrait,
 11.69" x 8.27" landscape) minus the supplied margins. For other sizes
-pass \code{page_width_in} / \code{page_height_in} directly via \code{...}.}
+give \code{page_width_in} / \code{page_height_in}.}
 
 \item{mermaid_config}{\code{NULL}, or a named list of Mermaid configuration,
 for example \code{list(theme = "forest")}; see \code{\link[=render_mermaid]{render_mermaid()}}.}
 
-\item{...}{Arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}, e.g. \code{max_scale}
-(default \code{1}: small diagrams are not enlarged; \code{Inf} fills the page),
-\code{font_scale}, \code{word_font_family}, \code{align}, \code{min_stroke_pt}, \code{alt_text},
-\code{page_width_in}. These take precedence over values computed from
-\code{page_margins_in}.}
+\item{max_scale}{Numeric. Largest size, as a multiple of Mermaid's own:
+the default \code{1} never enlarges a small diagram; \code{Inf} fills the page.}
+
+\item{page_width_in, page_height_in}{Numeric or \code{NULL}. The space, in
+inches, the diagram may fill. \code{NULL} (default): the content area of the
+page the orientation and margins give.}
+
+\item{...}{Other arguments passed to \code{\link[=build_diagram_xml]{build_diagram_xml()}}: \code{font_scale},
+\code{word_font_family}, \code{align}, \code{min_stroke_pt}, \code{alt_text}.}
 }
 \value{
 A \code{mermaid_word_diagram} object with fields:
@@ -70,6 +82,10 @@ chaining diagrams
 \item \code{margins}: normalised margin list, or \code{NULL} if \code{page_margins_in} was
 not supplied
 }
+
+For a list of sources, a list of these, in order; a diagram that could
+not be rendered holds its error condition instead (see
+\code{\link[=render_mermaid]{render_mermaid()}}) and uses no ids.
 }
 \description{
 Renders the diagram in a headless browser with Mermaid itself, then turns
@@ -87,5 +103,6 @@ Requires Node.js and the package's Node.js dependencies. Run
 \dontrun{
 d <- mermaid_to_word("flowchart TB\n  A[Start] --> B[End]")
 print(d)
+ds <- mermaid_to_word(list("pie\n  \"a\" : 1", "flowchart LR\n  A --> B"))
 }
 }

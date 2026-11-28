@@ -13,8 +13,8 @@
 #     affine matrix (translate the reference point to the origin, scale,
 #     rotate to the tangent, translate to the end) and its prims become
 #     ordinary scene pieces, named mermaid:marker:<id>.
-# The pieces grouping with their edge is done where items are assembled
-# (R/scene.R scope_blocks(), R/semantics.R unit_blocks_edge()).
+# Marker shapes are grouped with their stroke where items are assembled
+# (R/assemble.R).
 
 # ---- the id table ------------------------------------------------------------
 
@@ -61,7 +61,7 @@ end_plan <- function(id, spec = NULL, stroke_w = 1) {
 .word_end_max <- 5
 
 #' TRUE for a round or diamond end, which Word centres on the line end, whose
-#' marker is longer along the line than Word's largest end (H6): Mermaid's
+#' marker is longer along the line than Word's largest end: Mermaid's
 #' 11 px flowchart circle on a 1 px line would shrink to a dot. Ends drawn
 #' from their tip stay Word ends at any size.
 #' @noRd
@@ -87,7 +87,7 @@ line_end_kind <- function(marker_id) {
 
 # ---- reading a definition --------------------------------------------------------
 
-#' A marker definition (bridge A1) as what the arithmetic needs
+#' A marker definition from the bridge as what the arithmetic needs
 #'
 #' @return list(ref = c(refX, refY); fit, the content scale from the viewBox
 #'   (1 without one: markerWidth and markerHeight are then only a clip box);
@@ -133,7 +133,7 @@ marker_scale <- function(spec, stroke_w) {
                  oval = "centre", diamond = "centre")
 
 #' How far (px) the path end moves along the path, positive = beyond the end,
-#' so that Word's end sits where Mermaid's marker was (spec C2)
+#' so that Word's end sits where Mermaid's marker was
 #' @noRd
 tip_offset <- function(spec, kind, at, scale) {
   anchor <- .end_anchor[kind]
@@ -149,7 +149,7 @@ tip_offset <- function(spec, kind, at, scale) {
 }
 
 # Word's sm / med / lg for a length relative to the stroke width; the 1e-9
-# keeps the boundaries where the spec puts them despite rounding.
+# keeps a ratio of exactly 3.5 or 6 "med" despite rounding.
 size_class <- function(px, stroke_w) {
   r <- px / max(stroke_w, 1)
   c("sm", "med", "lg")[[1L + (r >= 3.5 - 1e-9) + (r > 6 + 1e-9)]]
@@ -213,7 +213,7 @@ marker_shapes <- function(spec, id, m, scale, piece) {
   shapes <- purrr::list_rbind(purrr::map(prims, prim_piece))
   if (is.null(shapes)) return(NULL)
   shapes$name <- rep(paste0("mermaid:marker:", id), nrow(shapes))
-  # Every part of a marker is a shape item (spec C3), a stroke too: it keeps
+  # Every part of a marker is a shape item, a stroke too: it keeps
   # the line preset and flips, but is not a line of the diagram.
   shapes$kind[shapes$kind == "line"] <- "shape"
   shapes
@@ -263,7 +263,7 @@ end_effect <- function(id, at, pc, track, specs) {
     return(list(kind = "none", size = c("med", "med"), shift = c(0, 0), shapes = shapes))
   }
   off <- tip_offset(spec, plan$kind, at, scale)
-  moves <- abs(off) > 0.25 && !anyNA(frame$dir)
+  moves <- abs(off) > .tolerance$end_shift_px && !anyNA(frame$dir)
   # At the start "beyond the end" is against the direction of travel.
   shift <- if (moves) off * frame$dir * (if (at == "start") -1 else 1) else c(0, 0)
   list(kind = plan$kind, size = end_size(spec, scale, pc$stroke_w), shift = shift,
@@ -283,32 +283,13 @@ mark_piece <- function(pc, specs) {
   parts <- purrr::compact(list(head$shapes, tail$shapes))
   shapes <- if (length(parts) > 0L) purrr::list_rbind(parts)
   if (!is.null(shapes)) {
+    # Right after the stroke in paint order.
     k <- nrow(shapes)
-    # Right after the edge in paint order. A lone shape of a stroke that has
-    # gone stands alone (the sequence number's circle); otherwise the shapes
-    # are grouped with their edge.
     shapes$pos <- pc$pos + seq_len(k) / (k + 1)
-    grouped <- k > 1L || !gone
-    shapes$marker_of <- rep(if (grouped) pc$i else NA_integer_, k)
-    shapes$edge_group <- rep(if (grouped) edge_group_name(pc) else NA_character_, k)
   }
   list(head = head, tail = tail, gone = gone, shapes = shapes,
        track = if (moved) path_move_end(path_move_end(track, "start", head$shift),
                                         "end", tail$shift))
-}
-
-#' For each piece, the row of the edge a grouped marker shape belongs to; NA
-#' for other pieces and for the shapes of a stroke that has gone
-#' @noRd
-marker_host <- function(p) {
-  edges <- which(is.na(p$marker_of))
-  edges[match_key(p$marker_of, p$i[edges])]
-}
-
-# The group of a loose edge and its marker shapes is named after the edge
-# item: mermaid:line:msg -> mermaid:edge_group:line:msg.
-edge_group_name <- function(pc) {
-  sub("^mermaid:", "mermaid:edge_group:", generic_names(pc))
 }
 
 # Rows `rows` of `pieces` redrawn along moved tracks.
@@ -326,15 +307,24 @@ set_tracks <- function(pieces, rows, tracks) {
   pieces
 }
 
-#' Pieces with their marker ends applied (spec C2, C3): every marked piece
-#' moved and sized for its Word ends, followed in paint order by the shapes
-#' of the markers Word cannot draw
+#' Pieces with their marker ends applied, and the shapes of the markers Word
+#' cannot draw
+#'
+#' Every marked piece is moved and sized for its Word ends. The marker shapes
+#' are kept apart from the pieces, so that no folding rule ever sees them;
+#' they are drawn with their stroke when items are assembled. A stroke of no
+#' length draws only its marker shapes: with none it is dropped; with one,
+#' that shape takes its place among the pieces, so that a sequence number
+#' can still be put inside its circle like any text in a shape; with several
+#' the stroke stays among the pieces as their place holder.
 #'
 #' @param markers `render$markers`: definitions by marker id, or NULL.
+#' @return list(pieces, markers): `markers` is a pieces tibble of marker
+#'   shapes with `host`, the `i` of the piece each belongs to, in paint order.
 #' @noRd
 place_markers <- function(pieces, markers) {
   marked <- which(!no_marker(pieces))
-  if (length(marked) == 0L) return(pieces)
+  if (length(marked) == 0L) return(list(pieces = pieces, markers = marker_ptype()))
   specs <- purrr::map(markers %||% list(), read_marker)
   fx <- purrr::map(marked, function(k) mark_piece(lapply(pieces, `[[`, k), specs))
   end_col <- function(end, field, k) purrr::map_chr(fx, function(f) f[[end]][[field]][[k]])
@@ -346,8 +336,23 @@ place_markers <- function(pieces, markers) {
   pieces$tail_w[marked] <- end_col("tail", "size", 2L)
   moved <- !purrr::map_lgl(fx, function(f) is.null(f$track))
   pieces <- set_tracks(pieces, marked[moved], purrr::map(fx[moved], "track"))
-  gone <- marked[purrr::map_lgl(fx, "gone")]
-  kept <- if (length(gone) > 0L) pieces[-gone, ] else pieces
-  out <- purrr::list_rbind(c(list(kept), purrr::map(fx, "shapes")), ptype = piece_ptype())
-  out[order(out$pos), ]
+
+  shapes <- purrr::map(fx, "shapes")
+  count <- purrr::map_int(shapes, function(s) if (is.null(s)) 0L else nrow(s))
+  gone <- purrr::map_lgl(fx, "gone")
+  alone <- gone & count == 1L
+  held <- !alone & count > 0L
+  kept <- setdiff(seq_len(nrow(pieces)), marked[gone & count < 2L])
+  stream <- purrr::list_rbind(c(list(pieces[kept, ]), shapes[alone]),
+                              ptype = piece_ptype())
+  side <- purrr::list_rbind(shapes[held], ptype = piece_ptype())
+  side$host <- rep(pieces$i[marked[held]], count[held])
+  list(pieces = stream[order(stream$pos), ], markers = side)
+}
+
+# The side table of marker shapes with none in it.
+marker_ptype <- function() {
+  side <- piece_ptype()
+  side$host <- integer()
+  side
 }

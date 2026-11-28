@@ -14,18 +14,23 @@
 #' Requires Node.js and the package's Node.js dependencies. Run
 #' [setup_mermaid2drawml()] once after installation.
 #'
-#' @param mermaid_code Character. Mermaid source; a vector of lines is joined
-#'   with newlines.
+#' @param mermaid_code Mermaid source: a character vector, whose lines are
+#'   joined with newlines into one diagram; or a list of such vectors, which
+#'   are rendered in one run of the browser (much faster than one call each)
+#'   and give a list of diagrams.
 #' @param start_id Integer. Id of the drawing; its shapes take the following
 #'   ids. Increment between diagrams in the same document to avoid id
 #'   collisions (see [body_add_mermaid()], which picks a free one
-#'   automatically). Default `1L`.
+#'   automatically). For a list, the first diagram's id; each next diagram
+#'   starts at the previous one's `next_id`. Default `1L`.
 #' @param timeout Integer. Seconds to allow for the Node.js render. Default 120.
 #' @param orientation Page orientation for the output document: `"portrait"`,
 #'   `"landscape"`, or `"auto"` (default). Auto chooses landscape only when the
 #'   diagram is wider than `auto_aspect` (width/height) **and** would not fit
-#'   the portrait content width at its drawn size (its width at 96 px per inch,
-#'   times `max_scale`). A small wide diagram therefore stays portrait.
+#'   the portrait content width at the size it is drawn (its width at 96 px
+#'   per inch, times `max_scale`). A small wide diagram therefore stays
+#'   portrait. With `page_width_in` or `page_height_in` given there is
+#'   nothing to decide: auto is portrait, fitted to that space.
 #' @param auto_aspect Numeric. Aspect-ratio threshold used when
 #'   `orientation = "auto"`. Diagrams wider than this ratio are landscape.
 #'   Default `1.3`.
@@ -39,14 +44,16 @@
 #'   }
 #'   The content area is computed from an A4 page (8.27" x 11.69" portrait,
 #'   11.69" x 8.27" landscape) minus the supplied margins. For other sizes
-#'   pass `page_width_in` / `page_height_in` directly via `...`.
+#'   give `page_width_in` / `page_height_in`.
 #' @param mermaid_config `NULL`, or a named list of Mermaid configuration,
 #'   for example `list(theme = "forest")`; see [render_mermaid()].
-#' @param ... Arguments passed to [build_diagram_xml()], e.g. `max_scale`
-#'   (default `1`: small diagrams are not enlarged; `Inf` fills the page),
-#'   `font_scale`, `word_font_family`, `align`, `min_stroke_pt`, `alt_text`,
-#'   `page_width_in`. These take precedence over values computed from
-#'   `page_margins_in`.
+#' @param max_scale Numeric. Largest size, as a multiple of Mermaid's own:
+#'   the default `1` never enlarges a small diagram; `Inf` fills the page.
+#' @param page_width_in,page_height_in Numeric or `NULL`. The space, in
+#'   inches, the diagram may fill. `NULL` (default): the content area of the
+#'   page the orientation and margins give.
+#' @param ... Other arguments passed to [build_diagram_xml()]: `font_scale`,
+#'   `word_font_family`, `align`, `min_stroke_pt`, `alt_text`.
 #' @return A `mermaid_word_diagram` object with fields:
 #'   - `xml`: DrawingML XML string ready for [officer::body_add_xml()]
 #'   - `scene`: what was drawn, one row per Word shape or group
@@ -57,10 +64,15 @@
 #'   - `orientation`: resolved orientation (`"portrait"` or `"landscape"`)
 #'   - `margins`: normalised margin list, or `NULL` if `page_margins_in` was
 #'     not supplied
+#'
+#'   For a list of sources, a list of these, in order; a diagram that could
+#'   not be rendered holds its error condition instead (see
+#'   [render_mermaid()]) and uses no ids.
 #' @examples
 #' \dontrun{
 #' d <- mermaid_to_word("flowchart TB\n  A[Start] --> B[End]")
 #' print(d)
+#' ds <- mermaid_to_word(list("pie\n  \"a\" : 1", "flowchart LR\n  A --> B"))
 #' }
 #' @export
 mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
@@ -68,37 +80,64 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
                             auto_aspect = 1.3,
                             page_margins_in = NULL,
                             mermaid_config = NULL,
+                            max_scale = 1,
+                            page_width_in = NULL,
+                            page_height_in = NULL,
                             ...) {
-  orientation <- match.arg(orientation)
-  margins <- .normalise_margins(page_margins_in)
-  mermaid_code <- paste(mermaid_code, collapse = "\n")
-
-  render <- render_mermaid(mermaid_code, timeout = timeout, config = mermaid_config)
-  scene <- build_scene(render)
-  extra_args <- list(...)
-
-  # The portrait content width is what "auto" compares the diagram against,
-  # so it is needed before the orientation is known.
-  resolved_orientation <- .resolve_orientation(
-    orientation,
-    width_px = scene$viewbox[[3]],
-    height_px = scene$viewbox[[4]],
-    auto_aspect = auto_aspect,
-    max_scale = extra_args$max_scale %||% 1,
-    portrait_width_in = .content_size("portrait", margins)[["width"]]
+  layout <- list(
+    orientation = match.arg(orientation), auto_aspect = auto_aspect,
+    margins = .normalise_margins(page_margins_in), max_scale = max_scale,
+    page_width_in = page_width_in, page_height_in = page_height_in
   )
+  extra_args <- list(...)
+  if (!is.list(mermaid_code)) {
+    render <- render_mermaid(mermaid_code, timeout = timeout, config = mermaid_config)
+    return(word_diagram(render, as.integer(start_id), layout, extra_args))
+  }
+  renders <- render_mermaid(mermaid_code, timeout = timeout, config = mermaid_config)
+  # Each diagram's ids follow the previous one's; a failed one uses none.
+  steps <- purrr::accumulate(renders, function(prev, render) {
+    if (inherits(render, "error")) return(list(next_id = prev$next_id, value = render))
+    d <- word_diagram(render, prev$next_id, layout, extra_args)
+    list(next_id = d$next_id, value = d)
+  }, .init = list(next_id = as.integer(start_id)))
+  purrr::map(steps[-1L], "value")
+}
 
-  size <- .content_size(resolved_orientation, margins)
-  layout <- list(page_width_in = size[["width"]], page_height_in = size[["height"]])
-  args <- utils::modifyList(layout, extra_args)
-  start_id <- as.integer(start_id)
+#' One rendered diagram as a `mermaid_word_diagram`
+#' @param layout list(orientation, auto_aspect, margins, max_scale,
+#'   page_width_in, page_height_in), as `mermaid_to_word()` takes them.
+#' @param extra_args Further arguments for build_diagram_xml().
+#' @noRd
+word_diagram <- function(render, start_id, layout, extra_args) {
+  scene <- build_scene(render)
+  orientation <- .layout_orientation(layout, scene$viewbox)
+  size <- .content_size(orientation, layout$margins)
+  args <- c(list(page_width_in = layout$page_width_in %||% size[["width"]],
+                 page_height_in = layout$page_height_in %||% size[["height"]],
+                 max_scale = layout$max_scale),
+            extra_args)
   result <- rlang::exec(build_diagram_xml, scene, start_id = start_id, !!!args)
-
   structure(
     list(xml = result$xml, scene = scene, type = scene$type,
          start_id = start_id, next_id = result$next_id,
-         orientation = resolved_orientation, margins = margins),
+         orientation = orientation, margins = layout$margins),
     class = "mermaid_word_diagram"
+  )
+}
+
+# The orientation a diagram is laid out in. "auto" compares the diagram, at
+# the max_scale it will be drawn with, against the portrait page it would
+# otherwise get; a page size given explicitly is the space there is, so it
+# leaves nothing to decide.
+.layout_orientation <- function(layout, viewbox) {
+  explicit <- !is.null(layout$page_width_in) || !is.null(layout$page_height_in)
+  if (layout$orientation == "auto" && explicit) return("portrait")
+  .resolve_orientation(
+    layout$orientation,
+    width_px = viewbox[[3]], height_px = viewbox[[4]],
+    auto_aspect = layout$auto_aspect, max_scale = layout$max_scale,
+    portrait_width_in = .content_size("portrait", layout$margins)[["width"]]
   )
 }
 
@@ -116,15 +155,15 @@ mermaid_to_word <- function(mermaid_code, start_id = 1L, timeout = 120L,
 #' default margins adds no section properties.
 #'
 #' @param doc An `rdocx` object from [officer::read_docx()].
+#' @param mermaid_code Character. Mermaid source of one diagram; a vector of
+#'   lines is joined with newlines.
 #' @inheritParams mermaid_to_word
 #' @param start_id Integer. Id of the drawing. Default `NULL`, meaning one more
 #'   than the largest id already used by a `wp:docPr` or any `cNvPr` in the
 #'   document body (1 for an empty document), so repeated calls on one document
 #'   never produce duplicate ids. An explicit value is used as given.
-#' @param ... Arguments passed to [build_diagram_xml()], e.g. `max_scale`
-#'   (default `1`: a diagram is drawn at natural size at most; `Inf` fills the
-#'   page), `font_scale`, `word_font_family`, `align`, `min_stroke_pt`,
-#'   `alt_text`. The drawing
+#' @param ... Other arguments passed to [build_diagram_xml()]: `font_scale`,
+#'   `word_font_family`, `align`, `min_stroke_pt`, `alt_text`. The drawing
 #'   is placed in line with the text, in its own paragraph.
 #' @return The modified `rdocx` object (invisibly).
 #' @examples
@@ -143,7 +182,17 @@ body_add_mermaid <- function(doc, mermaid_code, start_id = NULL,
                              auto_aspect = 1.3,
                              page_margins_in = NULL,
                              mermaid_config = NULL,
+                             max_scale = 1,
+                             page_width_in = NULL,
+                             page_height_in = NULL,
                              ...) {
+  if (is.list(mermaid_code)) {
+    cli::cli_abort(
+      c("{.arg mermaid_code} must be one diagram, not a list.",
+        i = "Use {.fn mermaid_to_word} for several diagrams in one render."),
+      class = "mermaid2drawml_bad_input"
+    )
+  }
   orientation <- match.arg(orientation)
   start_id <- start_id %||% .next_free_shape_id(doc)
   diagram <- mermaid_to_word(mermaid_code,
@@ -153,6 +202,9 @@ body_add_mermaid <- function(doc, mermaid_code, start_id = NULL,
                              auto_aspect = auto_aspect,
                              page_margins_in = page_margins_in,
                              mermaid_config = mermaid_config,
+                             max_scale = max_scale,
+                             page_width_in = page_width_in,
+                             page_height_in = page_height_in,
                              ...)
   needs_section <- diagram$orientation == "landscape" || !is.null(diagram$margins)
 
