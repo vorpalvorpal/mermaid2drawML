@@ -106,7 +106,8 @@
 //               to the root svg. For rotated text every box is the unrotated
 //               box, centred where the rotated text is. An HTML label's
 //               nested <svg> (an icon) is not text.
-//   image       href, m, png: "data:image/png;base64,..." (the picture drawn
+//   image       geom: {x, y, w, h} (its own box, which m carries to the root),
+//               href, m, png: "data:image/png;base64,..." (the picture drawn
 //               at its natural size, longer side at most 2000 px) or null
 //               when the browser cannot read it. An <img> in an HTML label is
 //               an image prim with tag "img", html: true and identity m.
@@ -763,13 +764,15 @@ async function pageMain({ code, config, svgId, zen, packs, wantSvg }) {
       html: true,
     }];
   };
+  // An image's own box, in the space its matrix starts from, as a rect's is.
+  const boxGeom = (b) => ({ x: r3(b[0]), y: r3(b[1]), w: r3(b[2]), h: r3(b[3]) });
   const htmlImagePrim = (img, fo, ctx) => {
     const cs = getComputedStyle(img);
     if (cs.display === 'none' || cs.visibility !== 'visible' || ctx.op * htmlOpacity(img, fo) <= 0) return [];
     const r = img.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) return [];
     const box = boxThrough(ctx.rootInv, rectBox(r));
-    return [{ ...head('image', 'img', img, ctx, box), href: img.getAttribute('src') || '', m: IDENTITY, png: ctx.pngs.get(img) ?? null, html: true }];
+    return [{ ...head('image', 'img', img, ctx, box), geom: boxGeom(box), href: img.getAttribute('src') || '', m: IDENTITY, png: ctx.pngs.get(img) ?? null, html: true }];
   };
   // Is el inside an <svg> nested in the foreignObject's HTML?
   const inNestedSvg = (el, fo) => !!el.parentElement && el.parentElement !== fo &&
@@ -792,7 +795,7 @@ async function pageMain({ code, config, svgId, zen, packs, wantSvg }) {
   const imagePrim = (el, ctx) => {
     const bb = safeBBox(el), m = matrixOf(ctx.rootInv, el);
     if (!bb || !m || !(bb[2] > 0 && bb[3] > 0)) return [];
-    return [{ ...head('image', 'image', el, ctx, boxThrough(m, bb)), href: hrefOf(el), m: roundM(m), png: ctx.pngs.get(el) ?? null }];
+    return [{ ...head('image', 'image', el, ctx, boxThrough(m, bb)), geom: boxGeom(bb), href: hrefOf(el), m: roundM(m), png: ctx.pngs.get(el) ?? null }];
   };
   const otherPrim = (el, tag, ctx) => {
     if (!(el instanceof SVGGraphicsElement)) return [];

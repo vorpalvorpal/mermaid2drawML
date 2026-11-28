@@ -462,6 +462,20 @@ describe('bridge contract 4', { skip: skipReason }, () => {
       assert.ok(img.m.length === 6 && img.m.every(isNum));
       assert.equal(typeof img.href, 'string');
     });
+    it('gives an image its own box, like a rect, so that a turned image can be placed', () => {
+      // geom is the box in the element's own space; m carries it to the root.
+      const through = (m, x, y) => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+      for (const img of [...imgNode.prims, ...imgHtml.prims].filter((p) => p.kind === 'image')) {
+        const g = img.geom;
+        assert.ok(g && [g.x, g.y, g.w, g.h].every(isNum), `geom of ${img.tag}: ${JSON.stringify(g)}`);
+        assert.ok(g.w > 0 && g.h > 0);
+        const [x0, y0] = through(img.m, g.x, g.y);
+        const [x1, y1] = through(img.m, g.x + g.w, g.y + g.h);
+        const near = (a, b) => Math.abs(a - b) < 0.01;
+        assert.ok(near(Math.min(x0, x1), img.bbox[0]) && near(Math.min(y0, y1), img.bbox[1]), 'corner');
+        assert.ok(near(Math.abs(x1 - x0), img.bbox[2]) && near(Math.abs(y1 - y0), img.bbox[3]), 'size');
+      }
+    });
     it('reports <img> in an HTML label as image prims with html: true', () => {
       const imgs = imgHtml.prims.filter((p) => p.kind === 'image');
       assert.equal(imgs.length, 2);
