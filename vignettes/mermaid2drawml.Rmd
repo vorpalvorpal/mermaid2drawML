@@ -42,6 +42,10 @@ Install Node.js (≥ 18) and npm, then run once after installing the R package:
 setup_mermaid2drawml()
 ```
 
+The packages include the Font Awesome icon packs Mermaid needs to draw icons.
+If you are upgrading from an earlier version, run `setup_mermaid2drawml()`
+again: without the icon packs, Mermaid draws a placeholder instead of an icon.
+
 You can verify the installation at any time:
 
 ```{r check_node}
@@ -73,6 +77,8 @@ The returned `mermaid_word_diagram` object contains:
 - `$scene` — what was drawn: `$scene$items` has one row per Word shape or group
 - `$type` — the Mermaid diagram type
 - `$next_id` — the next available shape ID (needed when adding multiple diagrams)
+- `$links`, `$images` — the hyperlinks and pictures the XML refers to (see
+  "Building documents yourself")
 
 ### `body_add_mermaid()`
 
@@ -121,20 +127,22 @@ read_docx() |>
 
 ## Layout and Sizing Options
 
-`build_diagram_xml()` (called internally) accepts parameters that control how
-the diagram is fitted to the page. Pass these through `...` in
-`mermaid_to_word()` or `body_add_mermaid()`:
+`mermaid_to_word()` and `body_add_mermaid()` take `max_scale`,
+`page_width_in` and `page_height_in` as named arguments. The other arguments
+below are passed on to `build_diagram_xml()`:
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `page_width_in` | 6.27 | Usable diagram width (inches) |
-| `page_height_in` | 9.69 | Maximum diagram height (inches) |
+| `page_width_in` | `NULL` | Width (inches) the diagram may fill; default: the content area of the page |
+| `page_height_in` | `NULL` | Height (inches) the diagram may fill; default: the content area of the page |
 | `max_scale` | 1 | Largest size relative to Mermaid's own; `Inf` fills the page |
 | `font_scale` | 1 | Multiplies every text size |
 | `word_font_family` | `NULL` | Font for all text (default: the font Mermaid used) |
 | `min_stroke_pt` | 0.75 | Thinnest line drawn, in points |
 | `align` | `"center"` | Horizontal alignment of the drawing |
 | `alt_text` | `NULL` | Alternative text (default: `accDescr` or `accTitle`) |
+| `links` | `"shape"` | How links are written: `"shape"`, `"field"` or `"none"` |
+| `embed_images` | `TRUE` | Embed pictures; `FALSE` leaves them out |
 
 Mermaid's own configuration goes in `mermaid_config`:
 
@@ -156,12 +164,14 @@ library(officer)
 
 d1 <- mermaid_to_word(
   "flowchart TB\n  A --> B",
-  start_id = 1L
+  start_id = 1L,
+  links = "field", embed_images = FALSE   # XML that needs nothing else
 )
 
 d2 <- mermaid_to_word(
   "flowchart LR\n  C --> D --> E",
-  start_id = d1$next_id   # pick up where d1 left off
+  start_id = d1$next_id,   # pick up where d1 left off
+  links = "field", embed_images = FALSE
 )
 
 doc <- read_docx() |>
@@ -170,6 +180,62 @@ doc <- read_docx() |>
   officer::body_add_xml(d2$xml)
 
 print(doc, target = "multi.docx")
+```
+
+## Several diagrams in one browser launch
+
+Starting Node and Chrome is most of the time a single render takes (a few
+seconds). Give `render_mermaid()` or `mermaid_to_word()` a list of diagrams and
+they are rendered in one launch, so N diagrams cost about one launch instead
+of N. A character vector is still one diagram. The result is a list; a diagram
+that fails holds its error condition in its slot. `mermaid_to_word()` numbers
+each diagram's shapes on from the previous one's `next_id`.
+`body_add_mermaid()` takes one diagram.
+
+```{r several}
+ds <- mermaid_to_word(list(
+  "flowchart LR\n  A --> B",
+  "pie\n  \"a\" : 1\n  \"b\" : 2"
+))
+failed <- vapply(ds, inherits, logical(1), what = "error")
+```
+
+## Handling problems
+
+The package's conditions have classes and carry data:
+
+| Condition | Field |
+|-----------|-------|
+| `mermaid2drawml_unsupported` (warning) | `tags`: the parts that could not be drawn |
+| `mermaid2drawml_small_text` (warning) | `points`: the smallest main text size |
+| `mermaid2drawml_syntax_error` | `mermaid_message`: Mermaid's own message |
+| `mermaid2drawml_timeout` | `timeout`: the limit, in seconds |
+| `mermaid2drawml_render_error` | any other failure of the bridge or browser |
+
+`render_mermaid(timeout = )` limits the whole render, Node and Chrome start-up
+included. `render_mermaid(svg = TRUE)` also keeps the SVG Mermaid drew, in
+`svg`, to look at when a conversion seems wrong.
+
+```{r conditions}
+result <- tryCatch(
+  mermaid_to_word("flowchart LR\n  A -->"),
+  mermaid2drawml_syntax_error = function(e) {
+    message("Mermaid says: ", e$mermaid_message)
+    NULL
+  },
+  mermaid2drawml_timeout = function(e) {
+    message("No answer in ", e$timeout, " seconds")
+    NULL
+  }
+)
+
+withCallingHandlers(
+  mermaid_to_word("flowchart LR\n  A --> B"),
+  mermaid2drawml_unsupported = function(w) {
+    message("Left out: ", paste(w$tags, collapse = ", "))
+    invokeRestart("muffleWarning")
+  }
+)
 ```
 
 ## Supported Mermaid Syntax
@@ -181,6 +247,30 @@ node shapes that Word has a preset for (rectangles, rounded rectangles,
 stadiums, diamonds, circles, hexagons, parallelograms, trapezoids,
 cylinders, documents and more) become that preset; the others are drawn
 from their exact outline. The README lists a verdict for each type.
+
+Beyond shapes and text, these are carried over:
+
+- **Text transparency** is written as Word text-fill transparency (Word 2010
+  and later).
+- **Gradients** on fills and lines, linear and radial, become Word gradient
+  fills. Sankey bands keep their colour ramp. Word's radial gradient only
+  approximates SVG's.
+- **Hyperlinks** (`click X href`; only `http`, `https` and `mailto`).
+  `links = "shape"` (default) makes the shape the click target and needs a
+  relationship in the document, which `body_add_mermaid()` registers.
+  `links = "field"` wraps the text in a `HYPERLINK` field, which is
+  self-contained but links only shapes that hold text. `links = "none"` leaves
+  links out.
+- **Pictures**: image nodes and images in labels are embedded when the browser
+  could read them. A remote image needs network access at render time;
+  otherwise it is left out with a `mermaid2drawml_unsupported` warning.
+  `embed_images = FALSE` leaves pictures out.
+- **Icons**: `fa:`, `fas:`, `far:` and `fab:` icons and icon nodes are
+  editable shapes. They need the icon packs that `setup_mermaid2drawml()`
+  installs; without them Mermaid draws a placeholder.
+- **Hand-drawn look**: hatching becomes a Word pattern fill in the hatch's
+  direction and colour. It is an approximation: Word's pattern, not Mermaid's
+  strokes.
 
 ## What comes out
 
@@ -195,7 +285,14 @@ The names show in Word's Selection Pane:
 | `mermaid:edge_label:<a>:<b>` | that edge's label |
 | `mermaid:edge_group:<a>-<b>` | an edge grouped with its marker shapes |
 | `mermaid:marker:<marker id>` | a line end Word has no end for |
-| `mermaid:group:<id or class>` | parts Mermaid drew inside one element: a legend entry, an actor, an icon |
+| `mermaid:group:<id or class>` | parts Mermaid drew inside one element: a legend entry, an actor |
+| `mermaid:icon:<node id>` | an icon, kept apart from its node's outline |
+| `mermaid:image[:<id>]` | an embedded picture |
+| `mermaid:shape` | a shape of a diagram without node data (block, sankey) |
+
+Names come from Mermaid's own node and edge data. Block and sankey diagrams
+have none, so their shapes are named generically (`mermaid:shape`,
+`mermaid:group:…`) rather than `mermaid:node:…`.
 
 Line ends are Word's own arrow heads where Word has the figure, sized from
 Mermaid's marker and reaching the node. Ends Word cannot draw (crow's
@@ -216,6 +313,7 @@ To restyle the result, pass these to `mermaid_to_word()` or
 - `word_font_family` sets one font for all text, and `font_scale`
   multiplies every text size;
 - `max_scale` lets a small diagram grow to fill the page (`Inf`);
+- `links` and `embed_images` say what happens to links and pictures;
 - `min_stroke_pt` sets the thinnest line drawn;
 - `mermaid_config` passes Mermaid's own configuration, such as
   `list(theme = "forest")`;
@@ -231,12 +329,33 @@ diagram <- mermaid_to_word(
 )
 ```
 
-## Limits
+## Building documents yourself
 
-- Embedded images and icon fonts are left out, with a warning.
-- Hyperlinks (`click`) are not carried over.
-- Text transparency is ignored, and gradients become flat colours.
-- The hand-drawn look loses its hatching.
-- Lines are not glued to shapes: moving a node does not drag its edges.
-  Groups keep a node's parts together.
-- Text is not re-wrapped: labels keep Mermaid's line breaks.
+`build_diagram_xml()` and `mermaid_to_word()` return `links` (`rel_id`, `url`)
+and `images` (`rel_id`, `bytes`) beside `xml` and `next_id`. The XML refers to
+them by placeholder ids, so when they have rows the XML alone is not
+complete. Either:
+
+- use `body_add_mermaid()`, which adds them and gives a complete document;
+- pass `links = "field"` and `embed_images = FALSE` for self-contained XML,
+  which `officer::body_add_xml()` can insert as it is; or
+- register the relationships yourself: save each image's `bytes` as a PNG
+  file and replace its `rel_id` in the XML by the file's path, and add each
+  link as an external hyperlink relationship of the document body
+  (`officer::docx_body_relationship(doc)$add()`), replacing its `rel_id` by
+  that relationship's id. `?build_diagram_xml` gives the details.
+
+The multi-diagram example above uses `officer::body_add_xml()` directly, so it
+passes `links = "field"` and `embed_images = FALSE`. `body_add_mermaid()`
+picks a free id itself.
+
+## Not supported or deferred
+
+- **Glued edges** (a moved node dragging its edges along) are deferred, and
+  may be rejected. Word reroutes only its own preset connectors on a drawing
+  canvas. Using them would mean giving up Mermaid's edge routes and the group
+  that holds a diagram together. They are not planned unless a workable form
+  is found. Until then, groups keep a node's parts together; move groups.
+- **A browser kept alive between calls** is deferred. Rendering several
+  diagrams in one call is the supported way to save launches.
+- **Re-wrapping text.** Labels keep Mermaid's line breaks.
