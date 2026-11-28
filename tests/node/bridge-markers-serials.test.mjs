@@ -1,5 +1,5 @@
-// Tests for bridge contract 3 (inst/node/mermaid_bridge.js): marker
-// definitions (A1), DOM serials `n` (A2) and the brightness filter (A3).
+// The bridge's marker definitions, the DOM serials `n` of prims and their
+// ancestors, and the brightness filter (inst/node/mermaid_bridge.js).
 // Two bridge launches in total: one for all sample diagrams, one for the
 // timeline with its brightness filter switched off through themeCSS.
 import { describe, it, before, after } from 'node:test';
@@ -60,7 +60,7 @@ const unionBox = (boxes) => {
 };
 const isPaint = (v) => v === null || v === 'context' || /^#[0-9A-Fa-f]{6}$/.test(v);
 
-describe('bridge contract 3', { skip: skipReason }, () => {
+describe('bridge: markers, DOM serials and filters', { skip: skipReason }, () => {
   let tmp, flow, cls, er, seq, nomark, tl, tlNeutral;
   const all = () => [flow, cls, er, seq, nomark, tl];
 
@@ -75,7 +75,7 @@ describe('bridge contract 3', { skip: skipReason }, () => {
       write('flow', FLOW), write('cls', CLASS), write('er', ER),
       write('seq', SEQ), write('nomark', NOMARK), write('tl', TIMELINE),
     ];
-    // --svg: svg is opt-in from bridge 4, and A3 reads the timelines' svg.
+    // --svg: svg is opt-in, and the brightness filter tests read the timelines' svg.
     [flow, cls, er, seq, nomark, tl] = parseOut(runBridge(['--svg', ...files]));
 
     const cfg = path.join(tmp, 'neutral.json');
@@ -93,7 +93,7 @@ describe('bridge contract 3', { skip: skipReason }, () => {
     });
   });
 
-  describe('A1 marker definitions', () => {
+  describe('marker definitions', () => {
     it('has a markers object on every successful result', () => {
       for (const r of all()) {
         assert.equal(typeof r.markers, 'object', r.type);
@@ -232,7 +232,7 @@ describe('bridge contract 3', { skip: skipReason }, () => {
     });
   });
 
-  describe('A2 DOM serials', () => {
+  describe('DOM serials', () => {
     const entries = (r) => {
       const e = r.prims.flatMap((p) => p.anc || []);
       assert.ok(e.length > 0 && e.every((a) => isInt(a.n)), `${r.type}: anc entries lack integer n`);
@@ -310,7 +310,7 @@ describe('bridge contract 3', { skip: skipReason }, () => {
     });
   });
 
-  describe('A3 brightness filter', () => {
+  describe('brightness filter', () => {
     const inWrapper = (p) => (p.anc || []).some((a) => /\beventWrapper\b/.test(a.cls || ''));
     it('uses a timeline whose stylesheet really has filter: brightness(120%) on .eventWrapper', () => {
       assert.match(tl.svg, /\.eventWrapper\{filter:brightness\(120%\);?\}/);

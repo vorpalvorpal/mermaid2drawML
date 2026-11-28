@@ -1,4 +1,5 @@
-# Unit tests for R/geometry.R.
+# Path geometry (R/geometry.R): matrices, parsing SVG path data, arcs as
+# cubics, transforms, bounding boxes, closure and rectangle recognition.
 
 # Compare a bbox / rect result ignoring any names.
 expect_box <- function(object, expected, tolerance = 1e-6) {
@@ -6,7 +7,6 @@ expect_box <- function(object, expected, tolerance = 1e-6) {
 }
 
 pp <- function(d) path_parse(d)
-path_cols <- c("cmd", "x1", "y1", "x2", "y2", "x", "y")
 
 # ---- matrices ------------------------------------------------------------
 
@@ -60,7 +60,7 @@ test_that("mat_is_upright rejects rotation and skew", {
 test_that("path_parse returns a tibble with the documented columns", {
   p <- pp("M 10 20 L 30 40")
   expect_s3_class(p, "tbl_df")
-  expect_named(p, path_cols)
+  expect_named(p, c("cmd", "x1", "y1", "x2", "y2", "x", "y"))
   expect_equal(p$cmd, c("M", "L"))
   expect_equal(p$x, c(10, 30))
   expect_equal(p$y, c(20, 40))
@@ -70,8 +70,8 @@ test_that("empty and garbage input give a zero-row tibble with the columns", {
   for (d in c("", "   ", "hello world", "#$%")) {
     p <- pp(d)
     expect_s3_class(p, "tbl_df")
-    expect_equal(nrow(p), 0L)
-    expect_named(p, path_cols)
+    expect_equal(nrow(p), 0L, info = paste0("'", d, "'"))
+    expect_named(p, path_cols, info = paste0("'", d, "'"))
   }
 })
 
@@ -472,4 +472,13 @@ test_that("poly_path accepts points as parsed from the bridge JSON", {
   p <- poly_path(pts, closed = FALSE)
   expect_equal(p$x, c(1, 3, 5))
   expect_equal(p$y, c(2, 4, 6))
+})
+
+# -- path_bbox and bare movetos -------------------------------------------------
+
+test_that("a trailing or leading bare moveto does not count in the bounding box", {
+  expect_equal(path_bbox(path_parse("M10 10 L50 10 L50 50 M 190 190")), c(10, 10, 40, 40))
+  expect_equal(path_bbox(path_parse("M 5 5 M10 10 L50 10 L50 50")), c(10, 10, 40, 40))
+  expect_equal(path_bbox(path_parse("M10 10 L50 10 L50 50 M 190 190 M 200 200")),
+               c(10, 10, 40, 40))
 })

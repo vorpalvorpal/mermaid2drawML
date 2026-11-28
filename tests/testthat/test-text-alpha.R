@@ -31,7 +31,7 @@ test_that("an opaque run writes no text fill", {
 test_that("the transparency follows the alpha for any value", {
   for (a in c(0.37, 0.5, 0.05)) {
     r <- alpha_runs(list(text_run("x", color = "#000000", alpha = a)))
-    expect_near(r$text_fill_alpha, word_transparency(a), tol = 1)
+    expect_near(r$text_fill_alpha, word_transparency(a), tol = 1, info = format(a))
   }
 })
 

@@ -40,7 +40,7 @@ export function parseOut(r) {
   return JSON.parse(r.stdout);
 }
 
-// The Font Awesome icon packs the bridge registers with Mermaid (V9) are
+// The Font Awesome icon packs the bridge registers with Mermaid are
 // optional in the Node directory; tests that need them skip without them.
 const iconPacks = ['fa6-solid', 'fa6-regular', 'fa6-brands'];
 const missingIcons = iconPacks.filter((n) => !fs.existsSync(path.join(depsDir, 'node_modules', '@iconify-json', n)));

@@ -1,4 +1,4 @@
-# The public wrappers (spec 5), offline: render_mermaid() is mocked to return
+# The public wrappers, offline: render_mermaid() is mocked to return
 # a bridge fixture. Page layout, orientation and sections are in test-page.R.
 
 code <- "flowchart TD\n  A --> B"
@@ -32,11 +32,13 @@ test_that("the wrappers keep their signatures, the sizing arguments just before 
                c("doc", "mermaid_code", "start_id", "timeout", "orientation", "auto_aspect",
                  "page_margins_in", "mermaid_config", "max_scale", "page_width_in",
                  "page_height_in", "..."))
-  for (f in list(mermaid_to_word, body_add_mermaid)) {
-    expect_null(formals(f)$mermaid_config)
-    expect_equal(formals(f)$max_scale, 1)
-    expect_null(formals(f)$page_width_in)
-    expect_null(formals(f)$page_height_in)
+  fns <- list(mermaid_to_word = mermaid_to_word, body_add_mermaid = body_add_mermaid)
+  for (fn in names(fns)) {
+    f <- formals(fns[[fn]])
+    expect_null(f$mermaid_config, info = fn)
+    expect_equal(f$max_scale, 1, info = fn)
+    expect_null(f$page_width_in, info = fn)
+    expect_null(f$page_height_in, info = fn)
   }
 })
 
@@ -226,4 +228,37 @@ test_that("a saved document with a diagram opens as a docx", {
   expect_no_error(print(doc, target = path))
   expect_gt(file.size(path), 5000)
   expect_s3_class(officer::read_docx(path), "rdocx")
+})
+
+# -- mermaid_to_word() on a list of diagrams ------------------------------------
+
+test_that("mermaid_to_word() on a list threads the ids from one diagram to the next", {
+  st <- local_mock_bridge(bridge_ok(bridge_array(fixture_json("pie"),
+                                                 fixture_json("default-theme"))))
+  ds <- quietly_expected(mermaid_to_word(list(code_pie, code_flow), start_id = 10))
+  expect_equal(st$runs, 1L)
+  expect_type(ds, "list")
+  expect_length(ds, 2L)
+  expect_s3_class(ds[[1]], "mermaid_word_diagram")
+  expect_s3_class(ds[[2]], "mermaid_word_diagram")
+  expect_equal(ds[[1]]$type, fixture_render("pie")$type)
+  expect_equal(ds[[2]]$type, fixture_render("default-theme")$type)
+
+  expect_equal(ds[[1]]$start_id, 10L)
+  expect_equal(ds[[2]]$start_id, ds[[1]]$next_id)
+  ids1 <- all_ids(dml_doc(ds[[1]]$xml))
+  ids2 <- all_ids(dml_doc(ds[[2]]$xml))
+  expect_equal(ids1[[1]], 10L)
+  expect_equal(ids2[[1]], ds[[1]]$next_id)
+  expect_equal(ds[[2]]$next_id, ds[[1]]$next_id + length(ids2))
+  expect_false(anyDuplicated(c(ids1, ids2)) > 0L)
+})
+
+test_that("mermaid_to_word() on a list of one gives a list of one diagram", {
+  local_mock_bridge()
+  ds <- quietly_expected(mermaid_to_word(list(code_pie), start_id = 3))
+  expect_type(ds, "list")
+  expect_length(ds, 1L)
+  expect_s3_class(ds[[1]], "mermaid_word_diagram")
+  expect_equal(ds[[1]]$start_id, 3L)
 })

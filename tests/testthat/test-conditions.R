@@ -46,7 +46,7 @@ test_that("a render that runs out of time carries the timeout in seconds", {
 })
 
 test_that("a timeout the bridge reports carries the render's timeout in seconds", {
-  # reading: the field holds the `timeout` the caller gave (seconds), not the
+  # The field holds the `timeout` the caller gave (seconds), not the
   # shorter in-page limit the bridge was handed.
   local_mock_bridge(bridge_ok(failure_stdout(list(kind = "timeout",
                                                   message = "page took too long"))))

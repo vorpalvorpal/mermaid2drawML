@@ -39,13 +39,12 @@ icon_body <- function() {
 }
 
 icons_of <- function(items) items[startsWith(items$name, "mermaid:icon"), ]
-drawn_rows <- function(items) items[items$kind != "group", ]
 
 # -- A label icon in a registered node -----------------------------------------------
 
 test_that("a label icon does not change the node's preset or paint", {
   items <- build_scene(icon_label_render(list(icon_head())))$items
-  sub <- drawn_rows(subtree_rows(items, "mermaid:node:X"))
+  sub <- drawn(subtree_rows(items, "mermaid:node:X"))
   node <- sub[!startsWith(sub$name, "mermaid:icon"), ]
   expect_equal(nrow(node), 1L)
   expect_equal(node$prst, "rect")
@@ -57,7 +56,7 @@ test_that("a label icon does not change the node's preset or paint", {
 })
 
 test_that("a label icon is a shape of its own, mermaid:icon:<node id>, in the node's group", {
-  # reading: a registered node with an icon becomes a group named after the
+  # A registered node with an icon becomes a group named after the
   # node, holding its shape and the icon.
   items <- build_scene(icon_label_render(list(icon_head())))$items
   icon <- icons_of(items)
@@ -85,7 +84,7 @@ test_that("an icon with the node's own box still does not pair or merge with it"
   icon <- icons_of(items)
   expect_equal(nrow(icon), 1L)
   expect_equal(icon$fill, "087EBF")
-  sub <- drawn_rows(subtree_rows(items, "mermaid:node:X"))
+  sub <- drawn(subtree_rows(items, "mermaid:node:X"))
   node <- sub[!startsWith(sub$name, "mermaid:icon"), ]
   expect_equal(node$fill, "FFFFFF")
   expect_equal(node$stroke, "000000")
@@ -99,10 +98,10 @@ test_that("the icon paths of one label form one group inside the node", {
   expect_length(unique(icons$parent), 1L)
   group <- item_named(items, icons$parent[1])
   expect_equal(group$kind, "group")
-  # reading: the group's name is a scope group's (mermaid:group:...); its tag
+  # The group's name is a scope group's (mermaid:group:...); its tag
   # is not fixed.
   expect_true(startsWith(group$name, "mermaid:group:"))
-  expect_equal(sort(drawn_rows(subtree_rows(items, group$name))$name), sort(icons$name))
+  expect_equal(sort(drawn(subtree_rows(items, group$name))$name), sort(icons$name))
   expect_true(group$name %in% subtree_rows(items, "mermaid:node:X")$name)
 })
 
@@ -148,7 +147,7 @@ test_that("flowchart-full: the icon node's glyph is mermaid:icon:ic in the node'
   expect_equal(icon$fill, "9370DB")
   expect_near(unlist(icon[1, c("x", "y", "w", "h")]), c(2596.258, 485.5, 42, 48), tol = 1e-3)
   # The node's own shapes and label are unchanged around it.
-  sub <- drawn_rows(subtree_rows(items, "mermaid:node:ic"))
+  sub <- drawn(subtree_rows(items, "mermaid:node:ic"))
   expect_true("Icon" %in% sub$label)
   expect_true("ECECFF" %in% sub$fill[!startsWith(sub$name, "mermaid:icon")])
 })
@@ -168,7 +167,7 @@ test_that("architecture-beta: every inline shape is an icon, each icon's paths i
   inline <- purrr::keep(prims, function(p) isTRUE(p$inline))
   expect_length(inline, 37L)
   items <- fixture_scene("architecture-beta")$items
-  icons <- icons_of(drawn_rows(items))
+  icons <- icons_of(drawn(items))
   expect_true(all(icons$name == "mermaid:icon:icon"))
   # No inline shape pairs or merges with another piece: one item each.
   expect_equal(nrow(icons), length(inline))
@@ -187,13 +186,13 @@ test_that("architecture-beta: every inline shape is an icon, each icon's paths i
   for (o in unique(owners)) {
     holder <- paste0("mermaid:group:", o)
     expect_equal(item_named(items, holder)$kind, "group", info = o)
-    in_holder <- icons_of(drawn_rows(subtree_rows(items, holder)))
+    in_holder <- icons_of(drawn(subtree_rows(items, holder)))
     expect_equal(nrow(in_holder), sum(owners == o), info = o)
     groups <- items$name[items$kind == "group" & items$name %in% subtree_groups(items, holder)]
     only_icons <- purrr::keep(groups, function(g) {
-      d <- drawn_rows(subtree_rows(items, g))
+      d <- drawn(subtree_rows(items, g))
       nrow(d) == sum(owners == o) && all(startsWith(d$name, "mermaid:icon"))
     })
-    expect_length(only_icons, 1L)
+    expect_equal(length(only_icons), 1L, info = o)
   }
 })

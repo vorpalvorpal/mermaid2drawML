@@ -1,6 +1,8 @@
-# Offline tests of R/render.R and R/setup.R: the external process is mocked.
+# render_mermaid() and the bridge's result, offline: the external process
+# is mocked (local_mock_bridge() in helper-render.R). Also .find_browser()
+# and read_render().
 
-# ---- .find_browser() (moved from test-fixes-browser.R) ---------------------
+# -- .find_browser() ------------------------------------------------------------
 
 test_that("PUPPETEER_EXECUTABLE_PATH wins when it exists", {
   f <- withr::local_tempfile()
@@ -38,7 +40,7 @@ test_that("the default candidates include the usual macOS Chrome path", {
   expect_equal(.find_browser(), mac)
 })
 
-# ---- read_render() / as_mermaid_render() -----------------------------------
+# -- read_render() and as_mermaid_render() --------------------------------------
 
 test_that("read_render returns a validated mermaid_render", {
   r <- read_render(fixture_path("flowchart-paint"))
@@ -85,10 +87,9 @@ test_that("as_mermaid_render rejects something that is not a list", {
   expect_error(as_mermaid_render("nope"), class = "mermaid2drawml_render_error")
 })
 
-# ---- render_mermaid() with a mocked processx::run ---------------------------
+# -- render_mermaid() with a mocked processx::run -------------------------------
 
 # local_mock_bridge() and fixture_stdout() are in helper-render.R.
-
 test_that("render_mermaid returns a mermaid_render built from the bridge array", {
   local_mock_bridge()
   r <- render_mermaid("pie\n  \"a\" : 1")
@@ -142,10 +143,12 @@ test_that("a vector of lines is collapsed with newlines", {
   expect_equal(st$input, "flowchart TD\n A --> B\n B --> C")
 })
 
-test_that("no --config argument is passed when config is NULL", {
-  st <- local_mock_bridge()
-  render_mermaid("flowchart TD\n A --> B")
-  expect_false("--config" %in% st$call$args)
+test_that("an empty config sends no --config", {
+  for (cfg in list(NULL, list())) {
+    st <- local_mock_bridge()
+    render_mermaid("flowchart TD\n A --> B", config = cfg)
+    expect_false("--config" %in% st$call$args, info = deparse(cfg))
+  }
 })
 
 test_that("config is written as JSON and passed with --config", {
@@ -156,6 +159,36 @@ test_that("config is written as JSON and passed with --config", {
   # the Mermaid file is still the last argument
   expect_true(st$input_existed)
   expect_equal(st$input, "flowchart TD\n A --> B")
+})
+
+# Run render_mermaid() with a mocked bridge, keeping the --config file's text.
+config_text <- function(config) {
+  st <- local_mock_bridge()
+  seen <- rlang::env(text = NULL)
+  testthat::local_mocked_bindings(
+    run = function(command, args = character(), ...) {
+      i <- match("--config", args)
+      seen$text <- paste(readLines(args[[i + 1L]], warn = FALSE, encoding = "UTF-8"),
+                         collapse = "")
+      list(status = 0L, stdout = fixture_stdout("pie"), stderr = "", timeout = FALSE)
+    },
+    .package = "processx"
+  )
+  render_mermaid("flowchart TD\n A --> B", config = config)
+  seen$text
+}
+
+test_that("config writes null members as null, numbers in full and scalars as scalars", {
+  txt <- config_text(list(theme = "dark", flowchart = list(padding = NULL),
+                          themeVariables = list(fontSize = 16.123456789)))
+  expect_match(txt, "\"theme\":\\s*\"dark\"")
+  expect_match(txt, "\"padding\":\\s*null")
+  expect_match(txt, "16.123456789", fixed = TRUE)
+  parsed <- jsonlite::fromJSON(txt, simplifyVector = FALSE)
+  expect_identical(parsed$theme, "dark")
+  expect_true("padding" %in% names(parsed$flowchart))
+  expect_null(parsed$flowchart$padding)
+  expect_equal(parsed$themeVariables$fontSize, 16.123456789, tolerance = 1e-12)
 })
 
 test_that("cleanup_tree and the timeout are passed to processx", {
@@ -171,15 +204,24 @@ test_that("the temporary input file is removed after the call", {
   expect_false(file.exists(utils::tail(st$call$args, 1L)))
 })
 
-# ---- render_mermaid(): failures ---------------------------------------------
-
-test_that("a Mermaid syntax error becomes a mermaid2drawml_syntax_error", {
-  out <- '[{"ok":false,"error":{"message":"Parse error on line 2: unexpected boom"}}]'
-  local_mock_bridge(list(status = 0L, stdout = out, stderr = "", timeout = FALSE))
-  expect_error(render_mermaid("flowchart TD\n A -->"),
-               class = "mermaid2drawml_syntax_error",
-               regexp = "unexpected boom")
+test_that("the bridge's output is read as UTF-8", {
+  st <- local_mock_bridge()
+  render_mermaid("flowchart TD\n A --> B")
+  expect_equal(st$call$encoding, "UTF-8")
 })
+
+test_that("non-ASCII label text comes back intact", {
+  label <- "Zürich — 東京"
+  raw <- list(ok = TRUE, bridge = 2L, mermaid = "11.13.0", type = "flowchart-v2",
+              role = "flowchart-v2", viewBox = list(0, 0, 200, 100),
+              prims = list(c(list(i = 0L), prim_text(label, 10, 10, 80, 20))), db = NULL)
+  out <- paste0("[", jsonlite::toJSON(raw, auto_unbox = TRUE, null = "null", digits = NA), "]")
+  local_mock_bridge(list(status = 0L, stdout = out, stderr = "", timeout = FALSE))
+  r <- render_mermaid("flowchart TD\n A --> B")
+  expect_equal(r$prims[[1]]$rows[[1]]$runs[[1]]$t, label)
+})
+
+# -- Failures -------------------------------------------------------------------
 
 test_that("a non-zero exit status is a render error that shows stderr", {
   local_mock_bridge(list(status = 1L, stdout = "",
@@ -189,11 +231,25 @@ test_that("a non-zero exit status is a render error that shows stderr", {
                regexp = "Cannot find package puppeteer")
 })
 
-test_that("a processx timeout is a mermaid2drawml_timeout", {
-  local_mock_bridge(list(status = NA_integer_, stdout = "", stderr = "",
-                         timeout = TRUE))
-  expect_error(render_mermaid("flowchart TD\n A --> B", timeout = 5L),
-               class = "mermaid2drawml_timeout")
+mock_failure <- function(error, env = parent.frame()) {
+  local_mock_bridge(list(status = 0L, stdout = failure_stdout(error), stderr = "",
+                         timeout = FALSE), env = env)
+}
+
+test_that("a bridge failure of kind bridge is a render error, not a syntax error", {
+  mock_failure(list(kind = "bridge", message = "Chrome crashed"))
+  cnd <- tryCatch(render_mermaid("flowchart TD\n A --> B"), error = function(e) e)
+  expect_s3_class(cnd, "mermaid2drawml_render_error")
+  expect_false(inherits(cnd, "mermaid2drawml_syntax_error"))
+})
+
+test_that("a syntax failure, or one with no kind (an old bridge), is a syntax error", {
+  mock_failure(list(kind = "syntax", message = "Parse error on line 2"))
+  expect_error(render_mermaid("flowchart TD\n A -->"),
+               class = "mermaid2drawml_syntax_error", regexp = "Parse error")
+  mock_failure(list(message = "Parse error on line 2"))
+  expect_error(render_mermaid("flowchart TD\n A -->"),
+               class = "mermaid2drawml_syntax_error", regexp = "Parse error")
 })
 
 test_that("empty stdout is a render error", {
@@ -209,197 +265,95 @@ test_that("stdout that is not JSON is a render error", {
                class = "mermaid2drawml_render_error")
 })
 
-# ---- check_mermaid2drawml() ---------------------------------------------------
+# -- Timeouts -------------------------------------------------------------------
 
-pinned_versions <- function() {
-  pj <- jsonlite::fromJSON(system.file("node", "package.json",
-                                       package = "mermaid2drawml"))
-  list(mermaid = pj$dependencies[["mermaid"]],
-       cli = pj$dependencies[["@mermaid-js/mermaid-cli"]])
-}
-
-write_pkg_version <- function(dir, pkg, version) {
-  d <- file.path(dir, "node_modules", pkg)
-  dir.create(d, recursive = TRUE, showWarnings = FALSE)
-  writeLines(sprintf('{"name": "%s", "version": "%s"}', pkg, version),
-             file.path(d, "package.json"))
-}
-
-fake_node_dir <- function(mermaid = pinned_versions()$mermaid,
-                          cli = pinned_versions()$cli,
-                          env = parent.frame()) {
-  dir <- withr::local_tempdir(.local_envir = env)
-  if (!is.null(mermaid)) write_pkg_version(dir, "mermaid", mermaid)
-  if (!is.null(cli)) write_pkg_version(dir, "@mermaid-js/mermaid-cli", cli)
-  # Every other pinned package (the icon packs) at its pinned version, so
-  # that only the two above decide the check.
-  pins <- jsonlite::fromJSON(system.file("node", "package.json",
-                                         package = "mermaid2drawml"))$dependencies
-  others <- setdiff(names(pins), c("mermaid", "@mermaid-js/mermaid-cli"))
-  for (pkg in others) write_pkg_version(dir, pkg, pins[[pkg]])
-  dir
-}
-
-# Mock .node_dir() and a counting check_node(); returns the counter.
-local_mock_node <- function(dir, env = parent.frame()) {
-  st <- rlang::env(dir = dir, calls = 0L)
-  testthat::local_mocked_bindings(
-    .node_dir = function() st$dir,
-    check_node = function() {
-      st$calls <- st$calls + 1L
-      invisible("node")
-    },
-    .env = env
-  )
-  st
-}
-
-test_that("the pinned versions in inst/node/package.json are readable", {
-  v <- pinned_versions()
-  expect_match(v$mermaid, "^[0-9]+\\.[0-9]+\\.[0-9]+")
-  expect_match(v$cli, "^[0-9]+\\.[0-9]+\\.[0-9]+")
+test_that("the bridge's in-page timeout is shorter than the whole-render timeout", {
+  st <- local_mock_bridge()
+  render_mermaid("flowchart TD\n A --> B", timeout = 120)
+  ms <- timeout_arg(st)
+  expect_false(is.na(ms))
+  expect_gt(ms, 0)
+  expect_lt(ms, 120000)
+  expect_gte(ms, 5000)
 })
 
-test_that("check_mermaid2drawml fails with a setup error when packages are missing", {
-  dir <- withr::local_tempdir()
-  local_mock_node(dir)
-  expect_error(check_mermaid2drawml(), class = "mermaid2drawml_setup",
-               regexp = "setup_mermaid2drawml()", fixed = FALSE)
+test_that("a very short timeout still leaves the bridge at least five seconds", {
+  st <- local_mock_bridge()
+  render_mermaid("flowchart TD\n A --> B", timeout = 3)
+  expect_gte(timeout_arg(st), 5000)
 })
 
-test_that("a different mermaid version is a setup error", {
-  dir <- fake_node_dir(mermaid = "0.0.1")
-  local_mock_node(dir)
-  expect_error(check_mermaid2drawml(), class = "mermaid2drawml_setup",
-               regexp = "setup_mermaid2drawml()")
+# `timeout` is the time one diagram gets. A list of diagrams shares one bridge
+# run, so the process as a whole is allowed more time the more diagrams it has,
+# while the bridge's own per-diagram limit (--timeout) is the same as for one.
+test_that("the process timeout for one diagram, and a list of one, is the timeout", {
+  st1 <- local_mock_bridge()
+  render_mermaid(code_pie, timeout = 100)
+  expect_equal(st1$call$timeout, 100)
+  st2 <- local_mock_bridge()
+  render_mermaid(list(code_pie), timeout = 100)
+  expect_equal(st2$call$timeout, 100)
 })
 
-test_that("a different mermaid-cli version is a setup error", {
-  dir <- fake_node_dir(cli = "0.0.1")
-  local_mock_node(dir)
-  expect_error(check_mermaid2drawml(), class = "mermaid2drawml_setup",
-               regexp = "setup_mermaid2drawml()")
+test_that("the process timeout for a list grows with the number of diagrams", {
+  st1 <- local_mock_bridge()
+  render_mermaid(code_pie, timeout = 100)
+  one_arg <- timeout_arg(st1)
+  st3 <- local_mock_bridge(bridge_ok(bridge_array(rep(fixture_json("pie"), 3L))))
+  render_mermaid(list(code_pie, code_pie, code_pie), timeout = 100)
+  expect_gte(st3$call$timeout, 3 * 100)
+  expect_equal(timeout_arg(st3), one_arg)
 })
 
-test_that("only one of the two packages being installed is a setup error", {
-  dir <- fake_node_dir(cli = NULL)
-  local_mock_node(dir)
-  expect_error(check_mermaid2drawml(), class = "mermaid2drawml_setup")
+# -- A list of diagrams in one bridge run ---------------------------------------
+
+test_that("a list of two sources runs node once with two input files", {
+  st <- local_mock_bridge(bridge_ok(bridge_array(fixture_json("pie"),
+                                                 fixture_json("default-theme"))))
+  res <- render_mermaid(list(code_pie, code_flow))
+  expect_equal(st$runs, 1L)
+  expect_equal(st$inputs, c(code_pie, code_flow))
+  expect_type(res, "list")
+  expect_length(res, 2L)
+  expect_s3_class(res[[1]], "mermaid_render")
+  expect_s3_class(res[[2]], "mermaid_render")
+  # In the order given.
+  expect_equal(res[[1]]$type, fixture_render("pie")$type)
+  expect_equal(res[[2]]$type, fixture_render("default-theme")$type)
 })
 
-test_that("check_mermaid2drawml succeeds when both versions match", {
-  dir <- fake_node_dir()
-  local_mock_node(dir)
-  expect_no_error(check_mermaid2drawml())
+test_that("each element of the list may be a vector of lines, joined into one diagram", {
+  st <- local_mock_bridge(bridge_ok(bridge_array(fixture_json("pie"),
+                                                 fixture_json("default-theme"))))
+  render_mermaid(list(c("pie", "  \"a\" : 1"), c("flowchart TD", "  A --> B")))
+  expect_equal(st$inputs, c(code_pie, code_flow))
 })
 
-test_that("a successful check is cached for the session", {
-  dir <- fake_node_dir()
-  st <- local_mock_node(dir)
-  check_mermaid2drawml()
-  n <- st$calls
-  expect_gte(n, 1L)
-  check_mermaid2drawml()
-  check_mermaid2drawml()
-  expect_equal(st$calls, n)
+test_that("a character vector of two lines is still one diagram", {
+  st <- local_mock_bridge()
+  res <- render_mermaid(c("pie", "  \"a\" : 1"))
+  expect_equal(st$runs, 1L)
+  expect_length(st$inputs, 1L)
+  expect_equal(st$inputs, code_pie)
+  expect_s3_class(res, "mermaid_render")
 })
 
-test_that("the cache is keyed by Node directory: another directory is checked afresh", {
-  dir1 <- fake_node_dir()
-  st <- local_mock_node(dir1)
-  check_mermaid2drawml()
-  n <- st$calls
-
-  dir2 <- fake_node_dir()
-  st$dir <- dir2
-  check_mermaid2drawml()
-  expect_gt(st$calls, n)
-
-  # and a broken second directory still fails even though the first passed
-  dir3 <- withr::local_tempdir()
-  st$dir <- dir3
-  expect_error(check_mermaid2drawml(), class = "mermaid2drawml_setup")
+test_that("a failed diagram is a condition in its slot, and the others still render", {
+  bad <- list(kind = "syntax", message = "Parse error on line 2: unexpected boom")
+  local_mock_bridge(bridge_ok(bridge_array(fixture_json("pie"), failure_json(bad))))
+  expect_no_error(res <- render_mermaid(list(code_pie, "flowchart TD\n A -->")))
+  expect_length(res, 2L)
+  expect_s3_class(res[[1]], "mermaid_render")
+  expect_s3_class(res[[2]], "mermaid2drawml_syntax_error")
+  expect_s3_class(res[[2]], "error")
+  expect_match(conditionMessage(res[[2]]), "unexpected boom", fixed = TRUE)
 })
 
-test_that("a failed check is not cached", {
-  dir <- fake_node_dir(mermaid = "0.0.1")
-  st <- local_mock_node(dir)
-  expect_error(check_mermaid2drawml(), class = "mermaid2drawml_setup")
-  write_pkg_version(dir, "mermaid", pinned_versions()$mermaid)
-  expect_no_error(check_mermaid2drawml())
-})
-
-# ---- setup_mermaid2drawml() ------------------------------------------------
-
-local_mock_setup <- function(status = 0L, env = parent.frame()) {
-  parent <- withr::local_tempdir(.local_envir = env)
-  node_dir <- file.path(parent, "node")
-  st <- rlang::env(call = NULL, node_dir = node_dir)
-  testthat::local_mocked_bindings(
-    check_node = function() invisible("node"),
-    .node_dir = function() node_dir,
-    .env = env
-  )
-  testthat::local_mocked_bindings(
-    run = function(command, args = character(), ...) {
-      st$call <- list(command = command, args = args, ...)
-      list(status = status, stdout = "", stderr = "npm ERR! boom", timeout = FALSE)
-    },
-    .package = "processx",
-    .env = env
-  )
-  st
-}
-
-quietly <- function(expr) suppressWarnings(suppressMessages(expr))
-
-test_that("setup copies package.json to the Node directory but not the bridge", {
-  st <- local_mock_setup()
-  quietly(setup_mermaid2drawml())
-  expect_true(file.exists(file.path(st$node_dir, "package.json")))
-  expect_false(file.exists(file.path(st$node_dir, "mermaid_bridge.js")))
-  expect_equal(
-    readLines(file.path(st$node_dir, "package.json")),
-    readLines(system.file("node", "package.json", package = "mermaid2drawml"))
-  )
-})
-
-test_that("setup runs npm install on the Node directory", {
-  skip_if(.Platform$OS.type == "windows", "npm is npm.cmd on Windows")
-  st <- local_mock_setup()
-  quietly(setup_mermaid2drawml())
-  expect_equal(st$call$command, "npm")
-  expect_true("install" %in% st$call$args)
-  expect_true(st$node_dir %in% st$call$args)
-  expect_false("--prefer-online" %in% st$call$args)
-})
-
-test_that("upgrade = TRUE adds --prefer-online", {
-  st <- local_mock_setup()
-  quietly(setup_mermaid2drawml(upgrade = TRUE))
-  expect_true("--prefer-online" %in% st$call$args)
-})
-
-test_that("setup raises a setup error when npm exits non-zero", {
-  local_mock_setup(status = 1L)
-  expect_error(quietly(setup_mermaid2drawml()), class = "mermaid2drawml_setup")
-})
-
-# ---- warnings from setup carry a class ---------------------------------------
-
-test_that("an old Node.js is a warning of class mermaid2drawml_old_node", {
-  skip_if(!nzchar(Sys.which("node")), "node is not on PATH")
-  testthat::local_mocked_bindings(
-    run = function(command, args = character(), ...) {
-      list(status = 0L, stdout = "v16.20.0\n", stderr = "", timeout = FALSE)
-    },
-    .package = "processx"
-  )
-  expect_warning(check_node(), class = "mermaid2drawml_old_node")
-})
-
-test_that("an incomplete installation is a warning of class mermaid2drawml_incomplete_setup", {
-  local_mock_setup()
-  expect_warning(suppressMessages(setup_mermaid2drawml()),
-                 class = "mermaid2drawml_incomplete_setup")
+test_that("a list of one source gives a list of one render", {
+  st <- local_mock_bridge()
+  res <- render_mermaid(list(code_pie))
+  expect_equal(st$runs, 1L)
+  expect_type(res, "list")
+  expect_length(res, 1L)
+  expect_s3_class(res[[1]], "mermaid_render")
 })

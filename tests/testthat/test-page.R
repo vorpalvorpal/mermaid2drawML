@@ -1,4 +1,3 @@
-# tests/testthat/test-page.R
 # Page layout: margins, page size, orientation choice and section breaks.
 # Offline: mermaid_to_word() is mocked, so no browser or Node is needed.
 
@@ -495,7 +494,7 @@ test_that("body_add_mermaid() decides auto with its max_scale", {
 })
 
 test_that("with page_width_in and page_height_in given, auto adds no section", {
-  # reading: an explicit page size is the space the caller has, so "auto" has
+  # An explicit page size is the space the caller has, so "auto" has
   # nothing to decide: the drawing is fitted to that size and the page is
   # left as it is (portrait, no section of its own).
   local_mock_render(wide_700())

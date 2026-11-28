@@ -126,7 +126,7 @@ test_that("no diagram in the classic look gets a pattern fill", {
   for (name in setdiff(all_fixture_names(), "flowchart-handdrawn")) {
     items <- fixture_scene(name)$items
     expect_equal(items$fill_pattern, rep(NA_character_, nrow(items)), info = name)
-    expect_length(xfind(fixture_doc(name), "//a:pattFill"), 0L)
+    expect_equal(length(xfind(fixture_doc(name), "//a:pattFill")), 0L, info = name)
   }
 })
 

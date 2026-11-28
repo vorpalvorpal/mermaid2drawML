@@ -1,15 +1,9 @@
-# Text in the DrawingML (spec 4, "Text"): paragraphs, runs, fonts, sizes,
+# Text in the DrawingML: paragraphs, runs, fonts, sizes,
 # body properties, and the small-text warning.
 
 one_text_doc <- function(..., viewBox = c(0, 0, 200, 100), xml_args = list()) {
   r <- generic_render(list(prim_text(...)), viewBox = viewBox)
   dml_doc(do.call(build_diagram_xml, c(list(r), xml_args))$xml)
-}
-
-the_text_box <- function(doc) {
-  boxes <- all_wsp(doc)
-  testthat::expect_length(boxes, 1L)
-  boxes[[1]]
 }
 
 # -- font_display_name() -------------------------------------------------------
@@ -41,7 +35,7 @@ font_attrs <- function(doc) {
 test_that("every rFonts attribute is the theme font: Segoe UI fixtures", {
   for (nm in c("base-segoe-subgraph", "base-segoe-stadium-bold-invisible")) {
     fa <- font_attrs(fixture_doc(nm))
-    expect_gt(fa$n, 0L)
+    expect_gt(fa$n, 0L, label = paste0("font runs in ", nm))
     expect_true(all(fa$values == "Segoe UI"), info = nm)
   }
 })
@@ -56,7 +50,7 @@ test_that("word_font_family overrides all four rFonts attributes", {
   for (nm in c("default-theme", "base-segoe-subgraph")) {
     res <- fixture_xml(nm, word_font_family = "Myriad Pro")
     fa <- font_attrs(dml_doc(res$xml))
-    expect_gt(fa$n, 0L)
+    expect_gt(fa$n, 0L, label = paste0("font runs in ", nm))
     expect_true(all(fa$values == "Myriad Pro"), info = nm)
     expect_false(grepl("Trebuchet|Segoe UI", res$xml), info = nm)
   }
@@ -66,7 +60,7 @@ test_that("the run's font wins, else the first family, with Word's capitalisatio
   run_font <- function(font, family) {
     doc <- one_text_doc(rows = list(list(text_run("x", font = font, family = family))),
                         x = 10, y = 10, w = 40, h = 20)
-    unique(unlist(shape_runs(the_text_box(doc))[c("ascii", "hAnsi", "eastAsia", "cs")]))
+    unique(unlist(shape_runs(the_wsp(doc))[c("ascii", "hAnsi", "eastAsia", "cs")]))
   }
   expect_equal(run_font("segoe ui", "\"segoe ui\", sans-serif"), "Segoe UI")
   expect_equal(run_font(NULL, "\"georgia\", serif"), "Georgia")
@@ -81,7 +75,7 @@ test_that("each row is one paragraph and each run one w:r", {
     list(text_run("Call "), text_run("000", bold = TRUE), text_run(" now")),
     list(text_run("then "), text_run("wait", italic = TRUE), text_run(" for it"))
   ), x = 10, y = 10, w = 120, h = 40)
-  box <- the_text_box(doc)
+  box <- the_wsp(doc)
   expect_equal(shape_paragraph_texts(box), c("Call 000 now", "then wait for it"))
   runs <- shape_runs(box)
   expect_equal(runs$text, c("Call ", "000", " now", "then ", "wait", " for it"))
@@ -94,7 +88,7 @@ test_that("underline and colour reach the run properties", {
   doc <- one_text_doc(rows = list(list(text_run("plain", color = "#333333"),
                                        text_run("under", underline = TRUE, color = "#FF0000"))),
                       x = 10, y = 10, w = 80, h = 20)
-  runs <- shape_runs(the_text_box(doc))
+  runs <- shape_runs(the_wsp(doc))
   expect_equal(runs$underline, c(FALSE, TRUE))
   expect_equal(runs$color, c("333333", "FF0000"))
 })
@@ -102,14 +96,14 @@ test_that("underline and colour reach the run properties", {
 test_that("text is emitted exactly as the bridge gives it (no markdown stripping, no entity decoding)", {
   raw <- "a &amp; b **c** __d__ <i>e</i> 2 * 3 \"q\""
   doc <- one_text_doc(raw, x = 10, y = 10, w = 180, h = 20)
-  expect_equal(shape_paragraph_texts(the_text_box(doc)), raw)
+  expect_equal(shape_paragraph_texts(the_wsp(doc)), raw)
 })
 
 test_that("w:t keeps leading and trailing spaces", {
   doc <- one_text_doc(rows = list(list(text_run("A "), text_run("bold ", bold = TRUE),
                                        text_run("word"))),
                       x = 10, y = 10, w = 100, h = 20)
-  box <- the_text_box(doc)
+  box <- the_wsp(doc)
   ts <- xfind(box, ".//w:t")
   expect_true(all(xml2::xml_attr(ts, "space") == "preserve"))
   expect_equal(shape_runs(box)$text, c("A ", "bold ", "word"))
@@ -154,7 +148,7 @@ test_that("every text paragraph has single spacing, zero indents and a jc", {
   for (nm in c("flowchart-paint", "base-segoe-subgraph",
                "base-segoe-stadium-bold-invisible", "default-theme")) {
     paras <- xfind(fixture_doc(nm), "//w:txbxContent/w:p")
-    expect_gt(length(paras), 3L)
+    expect_gt(length(paras), 3L, label = paste0("paragraphs in ", nm))
     for (p in as.list(paras)) expect_reset_ppr(p, info = nm)
   }
 })
@@ -174,7 +168,7 @@ test_that("edge-label and subgraph-title paragraphs are included", {
 test_that("free text paragraphs are aligned from the text anchor", {
   jc_for <- function(anchor) {
     doc <- one_text_doc("x", x = 10, y = 10, w = 40, h = 20, anchor = anchor)
-    paragraph_jc(shape_paragraphs(the_text_box(doc))[[1]])
+    paragraph_jc(shape_paragraphs(the_wsp(doc))[[1]])
   }
   expect_equal(jc_for("start"), "left")
   expect_equal(jc_for("middle"), "center")
@@ -294,7 +288,7 @@ test_that("the warning follows the main text size, the one carried by the most c
 
 test_that("a free text box: no fill, no line, its own box, wrap none, zero insets", {
   doc <- one_text_doc("Free", x = 30, y = 40, w = 50, h = 20)
-  box <- the_text_box(doc)
+  box <- the_wsp(doc)
   expect_equal(xattr(xfirst(box, "./wps:cNvSpPr"), "txBox"), "1")
   expect_equal(shape_fill(box)$kind, "none")
   expect_equal(shape_ln(box)$kind, "none")
@@ -309,7 +303,7 @@ test_that("a free text box: no fill, no line, its own box, wrap none, zero inset
 test_that("centred merged text: centre anchor, centred paragraphs, zero insets", {
   doc <- generic_doc(list(prim_rect(20, 20, 100, 40),
                           prim_text("Hi", x = 50, y = 30, w = 40, h = 20, anchor = "start")))
-  box <- the_text_box(doc)
+  box <- the_wsp(doc)
   expect_equal(shape_paragraph_texts(box), "Hi")
   bp <- body_pr(box)
   expect_equal(bp[["anchor"]], "ctr")
@@ -322,10 +316,10 @@ test_that("off-centre merged text: insets are the gaps to the shape, alignment f
   # rect 0..200 x 0..100, text 10..70 x 5..25, at natural scale (9525 EMU/px)
   doc <- generic_doc(list(prim_rect(0, 0, 200, 100),
                           prim_text("Title", x = 10, y = 5, w = 60, h = 20, anchor = "start")))
-  box <- the_text_box(doc)
+  box <- the_wsp(doc)
   bp <- body_pr(box)
   ins <- as.numeric(bp[c("lIns", "tIns", "rIns", "bIns")])
-  # step 2: B6, one inset per axis (left, top), anchored at the top
+  # one inset per axis (left, top), anchored at the top
   expect_near(ins, c(10, 5, 0, 0) * 9525, tol = 2)
   expect_equal(bp[["anchor"]], "t")
   expect_equal(bp[["wrap"]], "none")
@@ -336,10 +330,10 @@ test_that("a gap that is negative is clamped to a zero inset", {
   # 50 of 60 px inside the rect: merged, but overhanging on the right.
   doc <- generic_doc(list(prim_rect(0, 0, 100, 50),
                           prim_text("most", x = 50, y = 10, w = 60, h = 20, anchor = "end")))
-  bp <- body_pr(the_text_box(doc))
+  bp <- body_pr(the_wsp(doc))
   expect_equal(as.numeric(bp[["rIns"]]), 0)
-  expect_equal(as.numeric(bp[["lIns"]]), 0)   # step 2: B6, only the right inset, clamped
-  expect_equal(paragraph_jc(shape_paragraphs(the_text_box(doc))[[1]]), "right")
+  expect_equal(as.numeric(bp[["lIns"]]), 0)   # only the right inset, and that clamped
+  expect_equal(paragraph_jc(shape_paragraphs(the_wsp(doc))[[1]]), "right")
 })
 
 test_that("flowchart-paint: the subgraph title sits at the top of its background", {
@@ -347,7 +341,7 @@ test_that("flowchart-paint: the subgraph title sits at the top of its background
   expect_equal(shape_paragraph_texts(bg), "Group one")
   bp <- body_pr(bg)
   # cluster 189.203, 112 (232.273 x 280.672); title 268.262, 114 (74.156 x 19)
-  # step 2: B6, centred across (no side insets), at the top (top inset only)
+  # centred across (no side insets), at the top (top inset only)
   expect_near(as.numeric(bp[["tIns"]]), 2 * 9525, tol = 2)
   expect_equal(as.numeric(bp[["lIns"]]), 0)
   expect_equal(as.numeric(bp[["rIns"]]), 0)
@@ -363,4 +357,33 @@ test_that("node labels centred in their shapes have zero insets (flowchart-paint
     expect_equal(bp[["anchor"]], "ctr", info = id)
     for (ins in c("lIns", "tIns", "rIns", "bIns")) expect_equal(bp[[ins]], "0", info = id)
   }
+})
+
+# -- Body properties: vertical anchor and insets --------------------------------
+
+body_of <- function(prims) body_pr(the_wsp(generic_doc(prims)))
+
+insets_of <- function(bp) as.numeric(bp[c("lIns", "tIns", "rIns", "bIns")])
+
+test_that("a text below the shape's centre is anchored b with only the bottom inset", {
+  bp <- body_of(list(prim_rect(0, 0, 200, 100),
+                     prim_text("Foot", x = 130, y = 70, w = 60, h = 20, anchor = "end")))
+  expect_equal(bp[["anchor"]], "b")
+  expect_near(insets_of(bp), c(0, 0, 10, 10) * 9525, tol = 2)
+})
+
+test_that("a text centred vertically but not across is anchored ctr with one side inset", {
+  # anchor middle, centre 10 px right of the shape's: l = 20
+  bp <- body_of(list(prim_rect(0, 0, 200, 100),
+                     prim_text("Off", x = 90, y = 40, w = 40, h = 20, anchor = "middle",
+                               html = FALSE)))  # SVG text: placed by its anchor
+  expect_equal(bp[["anchor"]], "ctr")
+  expect_near(insets_of(bp), c(20, 0, 0, 0) * 9525, tol = 2)
+})
+
+test_that("a centred text is anchored ctr with zero insets", {
+  bp <- body_of(list(prim_rect(0, 0, 200, 100),
+                     prim_text("Mid", x = 80, y = 40, w = 40, h = 20)))
+  expect_equal(bp[["anchor"]], "ctr")
+  expect_equal(insets_of(bp), c(0, 0, 0, 0))
 })

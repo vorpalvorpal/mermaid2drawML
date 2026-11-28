@@ -9,7 +9,7 @@
 # <a> when `hrefs` gives it a URL (NA for none).
 linked_nodes_render <- function(hrefs, labels = NULL) {
   ids <- names(hrefs)
-  labels <- labels %|null|% as.list(stats::setNames(ids, ids))
+  labels <- labels %||% as.list(stats::setNames(ids, ids))
   prims <- purrr::imap(ids, function(id, k) {
     href <- if (is.na(hrefs[[id]])) NULL else hrefs[[id]]
     anc <- anc_node(paste0("flowchart-", id, "-0"), id = id, href = href)
@@ -59,7 +59,6 @@ field_url <- function(p) {
   gsub("%22", "\"", gsub("\\\\\"", "\"", m[[2]]), fixed = TRUE)
 }
 
-drawn <- function(items) items[items$kind != "group", ]
 
 # -- Scene: href ---------------------------------------------------------------
 
@@ -178,13 +177,14 @@ test_that("a free text inside an <a> is a click target", {
 })
 
 test_that("a dropped href and a diagram without links give no link and an empty links", {
-  for (r in list(linked_text_render("javascript:alert(1)"),
-                 generic_render(list(prim_rect(10, 10, 50, 20))))) {
-    res <- build_diagram_xml(r)
+  renders <- list(dropped = linked_text_render("javascript:alert(1)"),
+                  unlinked = generic_render(list(prim_rect(10, 10, 50, 20))))
+  for (case in names(renders)) {
+    res <- build_diagram_xml(renders[[case]])
     expect_s3_class(res$links, "tbl_df")
-    expect_equal(nrow(res$links), 0L)
-    expect_true(all(c("rel_id", "url") %in% names(res$links)))
-    expect_length(xfind(dml_doc(res$xml), "//a:hlinkClick"), 0L)
+    expect_equal(nrow(res$links), 0L, info = case)
+    expect_true(all(c("rel_id", "url") %in% names(res$links)), info = case)
+    expect_equal(length(xfind(dml_doc(res$xml), "//a:hlinkClick")), 0L, info = case)
   }
 })
 

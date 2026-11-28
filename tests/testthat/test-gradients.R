@@ -14,12 +14,6 @@ red_blue <- function(a1 = 1, a2 = 1) {
 
 grad_rect <- function(grad, ...) prim_rect(gbox[1], gbox[2], gbox[3], gbox[4], fill_grad = grad, ...)
 
-the_wsp <- function(doc) {
-  s <- all_wsp(doc)
-  testthat::expect_length(s, 1L)
-  s[[1]]
-}
-
 fill_grad_xml <- function(prim, ...) grad_of(shape_sppr(the_wsp(generic_doc(list(prim), ...))))
 
 # DrawingML's linear angle: clockwise from the x axis, in 60000ths of a
@@ -129,8 +123,8 @@ test_that("stops beyond the box are clamped to 0 and 100 %", {
   for (v in list(list(c(-30, 30), c(70, 30)), list(c(70, 30), c(170, 30)),
                  list(c(-80, 30), c(220, 30)))) {
     g <- fill_grad_xml(grad_rect(linear_grad(v[[1]], v[[2]], stops)))
-    expect_near(g$stops$pos, lin_pos(gbox, v[[1]], v[[2]], c(0, 0.5, 1)), tol = 1)
-    expect_true(all(g$stops$pos >= 0 & g$stops$pos <= 100000))
+    expect_near(g$stops$pos, lin_pos(gbox, v[[1]], v[[2]], c(0, 0.5, 1)), tol = 1, info = paste(unlist(v), collapse = " "))
+    expect_true(all(g$stops$pos >= 0 & g$stops$pos <= 100000), info = paste(unlist(v), collapse = " "))
   }
 })
 
@@ -259,15 +253,15 @@ test_that("a radial gradient is a:path circle with its centre as a:fillToRect", 
   for (centre in list(c(70, 35), c(45, 22.5))) {
     doc <- generic_doc(list(grad_rect(radial_grad(centre, 40, red_blue()))))
     g <- grad_of(shape_sppr(the_wsp(doc)))
-    expect_false(is.null(g))
-    expect_equal(g$path, "circle")
-    expect_true(is.na(g$ang))
-    expect_equal(g$stops$color, c("FF0000", "0000FF"))
+    expect_false(is.null(g), info = paste(centre, collapse = ", "))
+    expect_equal(g$path, "circle", info = paste(centre, collapse = ", "))
+    expect_true(is.na(g$ang), info = paste(centre, collapse = ", "))
+    expect_equal(g$stops$color, c("FF0000", "0000FF"), info = paste(centre, collapse = ", "))
     expected <- c(l = (centre[1] - gbox[1]) / gbox[3], t = (centre[2] - gbox[2]) / gbox[4],
                   r = (gbox[1] + gbox[3] - centre[1]) / gbox[3],
                   b = (gbox[2] + gbox[4] - centre[2]) / gbox[4]) * 100000
-    expect_near(g$fill_to_rect, expected, tol = 1)
-    expect_length(schema_order_problems(doc), 0L)
+    expect_near(g$fill_to_rect, expected, tol = 1, info = paste(centre, collapse = ", "))
+    expect_equal(length(schema_order_problems(doc)), 0L, info = paste(centre, collapse = ", "))
   }
 })
 
@@ -346,9 +340,9 @@ test_that("sankey-beta XML: each band's a:ln is a horizontal gradient of its two
                   expected)
   for (g in got) {
     # The vector runs left to right across each band's whole width.
-    expect_near(g$ang, 0, tol = 1)
-    expect_near(g$stops$pos, c(0, 100000), tol = 100)
-    expect_near(g$stops$alpha, c(50000, 50000), tol = 1)
+    expect_near(g$ang, 0, tol = 1, info = paste(g$stops$color, collapse = ">"))
+    expect_near(g$stops$pos, c(0, 100000), tol = 100, info = paste(g$stops$color, collapse = ">"))
+    expect_near(g$stops$alpha, c(50000, 50000), tol = 1, info = paste(g$stops$color, collapse = ">"))
   }
   expect_length(xfind(doc, "//wps:wsp/wps:spPr/a:gradFill"), 0L)
   expect_length(schema_order_problems(doc), 0L)
@@ -356,6 +350,6 @@ test_that("sankey-beta XML: each band's a:ln is a horizontal gradient of its two
 
 test_that("diagrams without gradients write no a:gradFill", {
   for (name in setdiff(all_fixture_names(), "sankey-beta")) {
-    expect_length(xfind(fixture_doc(name), "//a:gradFill"), 0L)
+    expect_equal(length(xfind(fixture_doc(name), "//a:gradFill")), 0L, info = name)
   }
 })

@@ -1,9 +1,8 @@
-// Tests for bridge contract 4 (inst/node/mermaid_bridge.js): units resolved in
-// the page (V1), text alpha (V2), gradients (V3), image data (V4), error kinds
-// and --timeout (P2/V5), run independence (V6), opt-in svg (V7) and static /
-// abstract class members (P11).
+// The bridge (inst/node/mermaid_bridge.js): units resolved in the page, text
+// alpha, gradients, image data, error kinds and --timeout, run independence,
+// opt-in svg, static and abstract class members, and icon packs.
 // Bridge launches: one for all sample diagrams, one each for flow alone and
-// class alone (V6), one with --svg, one with --timeout 1, one with a themeCSS
+// class alone (run independence), one with --svg, one with --timeout 1, one with a themeCSS
 // that paints a radial gradient, and one bad-argument call (no browser).
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -149,7 +148,7 @@ const pngSize = (dataUri) => {
 };
 const PNG_SIG = [137, 80, 78, 71, 13, 10, 26, 10];
 
-describe('bridge contract 4', { skip: skipReason }, () => {
+describe('bridge: units, paint, images and runs', { skip: skipReason }, () => {
   let tmp, flow, elk, cls, state, er, seq, pie, gantt, sankey;
   let imgNode, imgNodeBroken, imgHtml, zen, bad, icons, clash;
   let flowAlone, clsAlone, clsSvg, svgRun, timedOut, timedOutRun, radial, badFlag;
@@ -171,7 +170,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
       radial: write('radial', RADIAL), icons: write('icons', ICONS),
     };
 
-    // One launch for every sample diagram; flow first, class late (V6).
+    // One launch for every sample diagram; flow first, class late (run independence).
     [flow, elk, state, er, seq, pie, gantt, sankey, imgNode, imgNodeBroken, imgHtml, zen, bad, icons, cls] =
       parseOut(runBridge([f.flow, f.elk, f.state, f.er, f.seq, f.pie, f.gantt, f.sankey,
         f.imgNode, f.imgBroken, f.imgHtml, f.zen, f.bad, f.icons, f.cls]));
@@ -220,7 +219,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('V1 units (flowchart, dagre)', () => {
+  describe('units (flowchart, dagre)', () => {
     it('gives every node prim an ancestor unit with the id written in the diagram', () => {
       for (const [id, label] of [['A', 'Alpha'], ['B-1', 'Beta'], ['c_d', 'Gamma']]) {
         const t = textPrim(flow, label);
@@ -297,7 +296,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('V1 units (ELK layout)', () => {
+  describe('units (ELK layout)', () => {
     it('resolves nodes, subgraphs, edges and the label against db ids', () => {
       assert.equal(elk.ok, true);
       assert.deepEqual(ids(unitsOfKind(elk, 'node')), ['A', 'B-1', 'c_d']);
@@ -316,7 +315,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('V1 units (class, state and ER diagrams)', () => {
+  describe('units (class, state and ER diagrams)', () => {
     it('class: node units for each class, edge units for relations, label unit', () => {
       assert.deepEqual(ids(unitsOfKind(cls, 'node')), ['A', 'B', 'C']);
       assert.deepEqual(ids(unitsOfKind(cls, 'edge')), sortedIds(cls.db.edges));
@@ -354,7 +353,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('V1 units (diagram types without nodes and edges)', () => {
+  describe('units (diagram types without nodes and edges)', () => {
     it('sequence, pie, gantt and sankey carry no unit anywhere and still succeed', () => {
       for (const r of [seq, pie, gantt, sankey]) {
         assert.equal(r.ok, true, r.type);
@@ -367,7 +366,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('V2 text alpha', () => {
+  describe('text alpha', () => {
     it('gives every text run a numeric alpha between 0 and 1', () => {
       for (const r of [flow, elk, cls, state, er, seq, pie, gantt, sankey, imgHtml, zen]) {
         const rs = runs(r);
@@ -387,7 +386,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('V3 gradients', () => {
+  describe('gradients', () => {
     const links = () => sankey.prims.filter((p) => p.kind === 'path' && p.stroke_w > 0);
     it('reports a linear stroke_grad on every sankey link', () => {
       assert.equal(links().length, 3);
@@ -467,7 +466,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('V4 images', () => {
+  describe('images', () => {
     it('does not send an embedded picture again as its href or in the db', () => {
       // The picture travels once, as png: a data URI is cut after its header.
       const img = imgNode.prims.find((p) => p.kind === 'image');
@@ -478,7 +477,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     it('reports an image node as an image prim with PNG data, bbox and m', () => {
       const img = imgNode.prims.find((p) => p.kind === 'image');
       assert.ok(img, 'image prim');
-      // The picture is `png` (ruling B1): every prim already has `data` for
+      // The picture is `png`: every prim already has `data` for
       // its data-* attributes.
       assert.equal(typeof img.png, 'string', `image prim png is ${JSON.stringify(img.png)}`);
       assert.match(img.png, /^data:image\/png;base64,/);
@@ -528,7 +527,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('P2 / V5 error kinds and --timeout', () => {
+  describe('error kinds and --timeout', () => {
     it('reports a syntax error as ok:false with error.kind "syntax"', () => {
       assert.equal(bad.ok, false);
       assert.equal(bad.error.kind, 'syntax');
@@ -546,7 +545,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('V6 run independence', () => {
+  describe('run independence', () => {
     it('renders a flowchart identically alone and in a long run (ids and positions)', () => {
       assert.deepEqual(flow, flowAlone);
     });
@@ -559,7 +558,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('V7 svg is opt-in', () => {
+  describe('svg is opt-in', () => {
     it('has no svg field by default, on successes or failures', () => {
       for (const r of [flow, cls, gantt, bad, imgNodeBroken]) assert.ok(!('svg' in r), r.ok ? r.type : 'failure');
     });
@@ -571,7 +570,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('P11 static and abstract class members', () => {
+  describe('static and abstract class members', () => {
     const run = (res, text) => res.prims.filter(isText).flatMap((p) => p.rows.flatMap((r) => r.runs)).find((r) => r.t === text);
     it('marks the static method +stat() underline', () => {
       assert.equal(run(cls, '+stat()').underline, true);
@@ -592,7 +591,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
-  describe('V9 icon packs', { skip: iconSkipReason }, () => {
+  describe('icon packs', { skip: iconSkipReason }, () => {
     const inside = (b, o, tol = 0.5) =>
       b[0] >= o[0] - tol && b[1] >= o[1] - tol && b[0] + b[2] <= o[0] + o[2] + tol && b[1] + b[3] <= o[1] + o[3] + tol;
     const inlineOf = (res, id) => res.prims.filter((p) => p.inline === true && unitOf(p, 'node')?.id === id);

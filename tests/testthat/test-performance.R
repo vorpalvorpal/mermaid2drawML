@@ -1,4 +1,4 @@
-# Step 2 performance (contract-step2.md E). The limits are well above the
+# How long building a scene and its XML takes. The limits are well above the
 # targets (flowchart-full under 0.6 s) so that only a regression fails, not a
 # slow machine.
 

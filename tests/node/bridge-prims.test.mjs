@@ -1,6 +1,9 @@
-// Tests for inst/node/mermaid_bridge.js (bridge contract v2).
-// Each bridge launch starts headless Chrome, so all sample diagrams are
-// rendered in one invocation and every test asserts on that shared result.
+// The bridge's result (inst/node/mermaid_bridge.js): the invocation and its
+// JSON envelope, the db, and the prims it reads from the page (paint, edges,
+// text, hygiene) for flowchart, sequence, gantt and pie diagrams, and
+// --config. Each bridge launch starts headless Chrome, so all sample diagrams
+// are rendered in one invocation and every test asserts on that shared
+// result.
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
