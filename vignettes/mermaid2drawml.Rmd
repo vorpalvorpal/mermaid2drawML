@@ -359,3 +359,9 @@ picks a free id itself.
 - **A browser kept alive between calls** is deferred. Rendering several
   diagrams in one call is the supported way to save launches.
 - **Re-wrapping text.** Labels keep Mermaid's line breaks.
+- **Cropped or letterboxed pictures.** A picture is stretched to the box
+  Mermaid gives it, so one the browser would crop or letterbox comes out
+  distorted. Flowchart image nodes are not affected.
+- **An image node whose picture cannot be loaded** fails the whole diagram
+  with Mermaid's own error; only images inside labels are left out with a
+  warning.

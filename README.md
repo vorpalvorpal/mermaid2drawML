@@ -141,3 +141,10 @@ complete. Either:
   diagrams in one call is the supported way to save launches.
 - **Re-wrapping text.** Labels keep Mermaid's line breaks; Word does not
   re-wrap them.
+- **Cropped or letterboxed pictures.** A picture is stretched to the box
+  Mermaid gives it. Where the browser would crop or letterbox a picture whose
+  proportions differ from its box, Word shows it distorted. Flowchart image
+  nodes are not affected: Mermaid stretches those too.
+- **An image node whose picture cannot be loaded** fails the whole diagram
+  with Mermaid's own error. Only images inside labels are left out with a
+  warning.

@@ -209,3 +209,10 @@ installed Node.js packages do not match the pinned ones.
   in one call is the supported way to save launches.
 
 * Text is not re-wrapped: labels keep Mermaid's line breaks.
+
+* A picture is stretched to its box: one the browser would crop or letterbox
+  comes out distorted (flowchart image nodes are stretched by Mermaid too, so
+  they are unaffected).
+
+* An image node whose picture cannot be loaded fails the whole diagram with
+  Mermaid's own error; only images inside labels are left out with a warning.
