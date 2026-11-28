@@ -11,10 +11,11 @@ render_mermaid(mermaid_code, timeout = 120L, config = NULL, svg = FALSE)
 joined with newlines into one diagram; or a list of such vectors, each
 rendered as its own diagram in one run of the bridge.}
 
-\item{timeout}{Seconds the whole render may take, Node and Chrome start-up
-included; Chrome can be slow to start the first time. The bridge is
-given this less a start-up allowance (never under 5 seconds) as its own
-limit for each page.}
+\item{timeout}{Seconds each diagram may take, per diagram, Node and Chrome
+start-up included; Chrome can be slow to start the first time. The
+bridge is given this less a start-up allowance (never under 5 seconds)
+as its own limit for each page. A list of diagrams shares one run of
+the bridge, which is allowed the number of diagrams times \code{timeout}.}
 
 \item{config}{\code{NULL}, or a named list of Mermaid configuration (for example
 \code{list(theme = "forest")}), written as JSON and given to the bridge.}

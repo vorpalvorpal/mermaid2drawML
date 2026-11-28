@@ -93,7 +93,8 @@ setup_mermaid2drawml <- function(upgrade = FALSE) {
 
   problems <- setup_problems(.node_packages(node_dir))
   if (length(problems) > 0L) {
-    cli::cli_warn(c("The installation is incomplete.", problems))
+    cli::cli_warn(c("The installation is incomplete.", problems),
+                  class = "mermaid2drawml_incomplete_setup")
   } else {
     cli::cli_inform(c(v = "mermaid2drawml is ready to use."))
   }
@@ -122,7 +123,7 @@ check_node <- function() {
     cli::cli_warn(c(
       "Node.js {trimws(version)} detected; version 18 or later is recommended.",
       i = "Some features may not work."
-    ))
+    ), class = "mermaid2drawml_old_node")
   }
   invisible(node)
 }

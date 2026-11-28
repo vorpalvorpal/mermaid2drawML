@@ -7,8 +7,8 @@
 build_diagram_xml(
   x,
   start_id = 1L,
-  page_width_in = 6.27,
-  page_height_in = 9.69,
+  page_width_in = NULL,
+  page_height_in = NULL,
   font_scale = 1,
   word_font_family = NULL,
   align = c("center", "left", "right"),
@@ -28,8 +28,9 @@ from one (the \code{scene} field of a \code{\link[=mermaid_to_word]{mermaid_to_w
 ids. Use the \code{next_id} of the previous diagram when one document holds
 several.}
 
-\item{page_width_in, page_height_in}{Numeric. The space, in inches, the
-diagram may fill (default: A4 portrait with 1 inch margins).}
+\item{page_width_in, page_height_in}{Numeric, or \code{NULL} for the default. The
+space, in inches, the diagram may fill (default: A4 portrait with 1 inch
+margins). Each must be one finite positive number.}
 
 \item{font_scale}{Numeric. Multiplies every text size. Values below 1 help
 when \code{word_font_family} is wider than the font Mermaid measured.}

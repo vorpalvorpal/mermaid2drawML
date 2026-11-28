@@ -34,8 +34,9 @@
 #' @param start_id Integer. Id of the drawing; its shapes take the following
 #'   ids. Use the `next_id` of the previous diagram when one document holds
 #'   several.
-#' @param page_width_in,page_height_in Numeric. The space, in inches, the
-#'   diagram may fill (default: A4 portrait with 1 inch margins).
+#' @param page_width_in,page_height_in Numeric, or `NULL` for the default. The
+#'   space, in inches, the diagram may fill (default: A4 portrait with 1 inch
+#'   margins). Each must be one finite positive number.
 #' @param font_scale Numeric. Multiplies every text size. Values below 1 help
 #'   when `word_font_family` is wider than the font Mermaid measured.
 #' @param word_font_family Character. Font for all text. Default `NULL`: the
@@ -69,14 +70,16 @@
 #'   PNG files as raw vectors), one row per distinct picture. Both have no
 #'   rows when the XML needs nothing else.
 #' @export
-build_diagram_xml <- function(x, start_id = 1L, page_width_in = 6.27,
-                              page_height_in = 9.69, font_scale = 1,
+build_diagram_xml <- function(x, start_id = 1L, page_width_in = NULL,
+                              page_height_in = NULL, font_scale = 1,
                               word_font_family = NULL,
                               align = c("center", "left", "right"),
                               max_scale = 1, min_stroke_pt = 0.75,
                               alt_text = NULL, links = c("shape", "field", "none"),
                               embed_images = TRUE, ...) {
   check_dots(rlang::names2(list(...)))
+  page_width_in <- page_size_in(page_width_in, .default_page_width_in)
+  page_height_in <- page_size_in(page_height_in, .default_page_height_in)
   align <- match.arg(align)
   links <- match.arg(links)
   scene <- as_scene(x)
@@ -154,7 +157,25 @@ warn_unsupported <- function(tags) {
   )
 }
 
-# ---- scale and units -------------------------------------------------------------
+# ---- scale and units ---------------------------------------------------------
+
+# A4 portrait inside 1 inch margins.
+.default_page_width_in <- 6.27
+.default_page_height_in <- 9.69
+
+#' A page dimension: the default for NULL, else one finite positive number
+#' @noRd
+page_size_in <- function(value, default, arg = rlang::caller_arg(value),
+                         call = rlang::caller_env()) {
+  if (is.null(value)) return(default)
+  if (!is.numeric(value) || length(value) != 1L || !is.finite(value) || value <= 0) {
+    cli::cli_abort(
+      "{.arg {arg}} must be one finite positive number of inches, or {.code NULL}.",
+      class = "mermaid2drawml_bad_arg", call = call
+    )
+  }
+  value
+}
 
 #' EMU per px: fit the page, never above max_scale times natural size
 #'

@@ -48,10 +48,11 @@
 #' @param mermaid_code Mermaid source: a character vector, whose lines are
 #'   joined with newlines into one diagram; or a list of such vectors, each
 #'   rendered as its own diagram in one run of the bridge.
-#' @param timeout Seconds the whole render may take, Node and Chrome start-up
-#'   included; Chrome can be slow to start the first time. The bridge is
-#'   given this less a start-up allowance (never under 5 seconds) as its own
-#'   limit for each page.
+#' @param timeout Seconds each diagram may take, per diagram, Node and Chrome
+#'   start-up included; Chrome can be slow to start the first time. The
+#'   bridge is given this less a start-up allowance (never under 5 seconds)
+#'   as its own limit for each page. A list of diagrams shares one run of
+#'   the bridge, which is allowed the number of diagrams times `timeout`.
 #' @param config `NULL`, or a named list of Mermaid configuration (for example
 #'   `list(theme = "forest")`), written as JSON and given to the bridge.
 #' @param svg Logical. `TRUE` also returns the SVG text Mermaid drew, in the
@@ -99,7 +100,7 @@ render_mermaid <- function(mermaid_code, timeout = 120L, config = NULL, svg = FA
     env = c("current",
             M2D_NODE_DIR = .node_dir(),
             if (!is.na(browser)) c(PUPPETEER_EXECUTABLE_PATH = browser)),
-    timeout = timeout,
+    timeout = timeout * length(inputs),
     encoding = "UTF-8",
     cleanup_tree = TRUE,
     error_on_status = FALSE

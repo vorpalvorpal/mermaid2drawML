@@ -157,6 +157,19 @@ installed Node.js packages do not match the pinned ones.
 
 ## Fixes
 
+* A hand-drawn node with no fill (`fill:none`, `fill:transparent`) keeps its
+  outline instead of being taken for a hatched node.
+
+* `render_mermaid(timeout =)` is per diagram: a list of diagrams is allowed
+  that many seconds for each.
+
+* `build_diagram_xml()` takes `NULL` for `page_width_in` and `page_height_in`
+  as the default, and a value that is not one finite positive number is an
+  error naming the argument.
+
+* The warnings for an old Node.js and an incomplete installation have the
+  classes `mermaid2drawml_old_node` and `mermaid2drawml_incomplete_setup`.
+
 * Cylinders have their true height. The horizontal (`h-cyl`) and lined
   (`lin-cyl`) cylinders are no longer swapped.
 

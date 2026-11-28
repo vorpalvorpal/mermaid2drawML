@@ -30,10 +30,11 @@ than the largest id already used by a \code{wp:docPr} or any \code{cNvPr} in the
 document body (1 for an empty document), so repeated calls on one document
 never produce duplicate ids. An explicit value is used as given.}
 
-\item{timeout}{Seconds the whole render may take, Node and Chrome start-up
-included; Chrome can be slow to start the first time. The bridge is
-given this less a start-up allowance (never under 5 seconds) as its own
-limit for each page.}
+\item{timeout}{Seconds each diagram may take, per diagram, Node and Chrome
+start-up included; Chrome can be slow to start the first time. The
+bridge is given this less a start-up allowance (never under 5 seconds)
+as its own limit for each page. A list of diagrams shares one run of
+the bridge, which is allowed the number of diagrams times \code{timeout}.}
 
 \item{orientation}{Page orientation for the output document: \code{"portrait"},
 \code{"landscape"}, or \code{"auto"} (default). Auto chooses landscape only when the

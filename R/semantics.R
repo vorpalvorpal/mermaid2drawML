@@ -231,10 +231,12 @@ registered_item <- function(pu, reg, hand_drawn, name) {
   } else NA_integer_
   stroked <- which(!is.na(shapes$stroke))
   stroke_from <- if (length(stroked) > 0L) max(stroked) else NA_integer_
-  # The hand-drawn look paints the fill as hachure strokes, drawn first.
-  # Word has no hachure: the hatch's colour becomes the fill, drawn as the
-  # line pattern nearest the strokes' direction.
-  hachure <- is.na(fill_from) && hand_drawn && nrow(shapes) > 0L
+  # The hand-drawn look paints the fill as hachure strokes, drawn first and
+  # followed by the outline. Word has no hachure: the hatch's colour becomes
+  # the fill, drawn as the line pattern nearest the strokes' direction. A
+  # node with no fill (fill:none) is drawn as its outline alone, so a hatch
+  # needs a stroke-only piece besides that outline.
+  hachure <- is.na(fill_from) && hand_drawn && length(stroked) > 1L
 
   # A registered rect drawn with rounded corners (a state) keeps them.
   rounded_rect <- reg$prst == "rect" &&
