@@ -172,7 +172,7 @@ describe('mermaid bridge', { skip: skipReason }, () => {
       assert.equal(flow.ok, true);
       assert.equal(flow.type, 'flowchart-v2');
       assert.equal(flow.role, 'flowchart-v2');
-      assert.equal(flow.bridge, 2);
+      assert.equal(flow.bridge, 3);
       assert.match(flow.mermaid, /^\d+\.\d+\.\d+/);
       assert.ok(flow.svg.startsWith('<svg'));
     });

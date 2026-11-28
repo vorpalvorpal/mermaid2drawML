@@ -18,11 +18,11 @@
 //   2 for bad arguments or unreadable inputs, 1 for missing dependencies or a
 //   browser failure, with a message on stderr.
 //
-// Result (bridge contract 2)
+// Result (bridge contract 3)
 //   failure: { ok: false, error: { message } }   (syntax error, render error,
 //            or "timed out after 60 s"; never Mermaid's error picture)
 //   success: { ok: true, bridge: 2, mermaid: "<version>", type, role,
-//              viewBox: [x, y, w, h], title, desc, svg, prims, db }
+//              viewBox: [x, y, w, h], title, desc, svg, prims, markers, db }
 //     type     diagram.type from mermaidAPI.getDiagramFromText
 //     role     the root svg's aria-roledescription
 //     title, desc  text of the root <title>/<desc> (accTitle/accDescr) or null
@@ -31,6 +31,15 @@
 //              second parse in a fresh mermaid bundle with Math.random reseeded
 //              (as it is for the render), so node domIds and random ids match
 //              the ids in the svg.
+//     markers  { "<marker id>": { viewBox: [x, y, w, h] | null, refX, refY,
+//              w, h (markerWidth/Height, default 3), units ("strokeWidth" |
+//              "userSpaceOnUse"), orient ("auto" | "auto-start-reverse" | degrees),
+//              prims: [shape prims] } }, only for markers some prim refers to.
+//              A marker prim has kind, tag, cls, geom, m, bbox, fill, fill_a,
+//              stroke, stroke_a, stroke_w, dash; m and bbox are in marker
+//              content coordinates (only transforms inside the marker are
+//              composed) and stroke_w is in those units. A paint of
+//              context-fill / context-stroke is the string "context".
 //   All coordinates are in the root svg's user space, after every transform.
 //   Ids have the render id prefix ("m2d_" / "m2d-") removed. Numbers are
 //   rounded: coordinates 3 dp, matrix a-d 6 dp, alphas 4 dp.
@@ -40,15 +49,21 @@
 // display:none, non-visible, zero-opacity, unpainted or zero-size element.
 //   every prim  i, kind ("rect" | "ellipse" | "line" | "poly" | "path" |
 //               "text" | "image" | "other"), tag, id, cls, data {data-* attrs},
-//               anc [{ id, cls, data?, href? }] (g/a/svg/switch ancestors,
-//               outermost first, root excluded, all-empty entries dropped),
-//               bbox [x, y, w, h]
+//               n (DOM serial: index in document order among all elements
+//               under the root svg, root = 0; unique per element),
+//               anc [{ n, id, cls, data?, href? }] (g/a/svg/switch ancestors,
+//               outermost first, root excluded; unnamed ones carry n alone,
+//               with id and cls empty), bbox [x, y, w, h]
 //   shapes      m [a, b, c, d, e, f] (own user space -> root),
 //               geom: rect {x, y, w, h, rx, ry} | ellipse {cx, cy, rx, ry} |
 //                     line {x1, y1, x2, y2} | poly {points, closed} | path {d},
 //               fill "#RRGGBB" | null, fill_a, fill_approx (gradient/pattern),
 //               stroke, stroke_a, stroke_w (root units), dash [..] | null,
 //               marker_start, marker_end (marker ids) | null.
+//               When the element or an ancestor has a computed filter that is
+//               exactly one brightness(v), fill and stroke colours (and HTML
+//               box colours) are multiplied by the product of the v, clamped;
+//               alphas and text colours are untouched.
 //               HTML boxes with a background inside a foreignObject are rect
 //               prims with html: true and identity m, placed just before that
 //               foreignObject's text prim.
@@ -64,7 +79,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const BRIDGE_VERSION = 2;
+const BRIDGE_VERSION = 3;
 const SVG_ID = 'm2d';
 const PAGE_TIMEOUT_MS = 60000;
 const RANDOM_SEED = 20240101;
@@ -295,10 +310,24 @@ async function pageMain({ code, config, svgId }) {
     const c = parseColour(value);
     return c && c.a * opacity > 0 ? { colour: c.hex, a: r4(c.a * opacity), approx: false } : NO_PAINT;
   };
+  // Marker content may paint with context-fill / context-stroke.
+  const CONTEXT_PAINT = { colour: 'context', a: 1, approx: false };
+  const BRIGHT = /^brightness\(\s*(-?[\d.]+)(%?)\s*\)$/;
+  const brightnessOf = (cs) => {
+    const m = BRIGHT.exec((cs.filter || '').trim());
+    return m ? num(m[1], 1) / (m[2] ? 100 : 1) : 1;
+  };
+  const brighten = (paint, k) => {
+    if (k === 1 || !/^#[0-9A-F]{6}$/.test(paint.colour || '')) return paint;
+    const c = [1, 3, 5].map((i) => parseInt(paint.colour.slice(i, i + 2), 16) * k);
+    return { ...paint, colour: `#${c.map(hex2).join('')}`.toUpperCase() };
+  };
   const parseDash = (s, scale) => {
     if (!s || s === 'none') return null;
     const v = s.split(/[\s,]+/).filter(Boolean).map((p) => parseFloat(p));
-    return v.length === 0 || v.some((x) => !Number.isFinite(x) || x < 0) || v.every((x) => x === 0)
+    // "1, 0" (Mermaid's markers) has no gaps: a solid line.
+    const gapless = v.length % 2 === 0 && v.every((x, k) => k % 2 === 0 || x === 0);
+    return v.length === 0 || v.some((x) => !Number.isFinite(x) || x < 0) || v.every((x) => x === 0) || gapless
       ? null : v.map((x) => r3(x * scale));
   };
 
@@ -331,15 +360,14 @@ async function pageMain({ code, config, svgId }) {
     .filter((a) => a.name.startsWith('data-') && a.value.length <= 120)
     .map((a) => [a.name.slice(5), a.value]));
   const clsOf = (el) => el.getAttribute('class') || '';
-  const ancEntry = (el) => {
+  const ancEntry = (el, ctx) => {
     const id = stripId(el.getAttribute('id')), cls = clsOf(el), data = dataOf(el);
     const href = el.tagName.toLowerCase() === 'a' ? (el.getAttribute('href') || el.getAttribute('xlink:href') || '') : '';
     const hasData = Object.keys(data).length > 0;
-    if (!id && !cls && !hasData && !href) return null;
-    return { id, cls, ...(hasData ? { data } : {}), ...(href ? { href } : {}) };
+    return { n: ctx.serial.get(el), id, cls, ...(hasData ? { data } : {}), ...(href ? { href } : {}) };
   };
   const head = (kind, tag, el, ctx, bbox) =>
-    ({ kind, tag, id: stripId(el.getAttribute ? el.getAttribute('id') : el.id), cls: clsOf(el), data: dataOf(el), anc: ctx.anc, bbox: roundBox(bbox) });
+    ({ kind, tag, n: ctx.serial.get(el), id: stripId(el.getAttribute ? el.getAttribute('id') : el.id), cls: clsOf(el), data: dataOf(el), anc: ctx.anc, bbox: roundBox(bbox) });
   const safeBBox = (el) => { try { const b = el.getBBox(); return [b.x, b.y, b.width, b.height]; } catch (e) { return null; } };
 
   // -- the root --
@@ -371,14 +399,15 @@ async function pageMain({ code, config, svgId }) {
   const shapePrim = (el, tag, cs, ctx) => {
     const kind = SHAPE_KIND[tag];
     const bb = safeBBox(el);
-    const m = matrixOf(ctx.rootInv, el);
+    const m = ctx.mOf(el);
     if (!bb || !m) return [];
     const geom = GEOM[kind](el, cs, bb);
     if (!geom) return [];
     const scale = scaleOf(m);
-    const fill = kind === 'line' ? NO_PAINT : paintOf(cs.fill, num(cs.fillOpacity, 1) * ctx.op);
+    const shapePaint = (v, o) => (/^context-(fill|stroke)$/.test(v) && ctx.inMarker ? CONTEXT_PAINT : brighten(paintOf(v, o), ctx.br));
+    const fill = kind === 'line' ? NO_PAINT : shapePaint(cs.fill, num(cs.fillOpacity, 1) * ctx.op);
     const width = num(cs.strokeWidth, 0);
-    const stroke = width > 0 ? paintOf(cs.stroke, num(cs.strokeOpacity, 1) * ctx.op) : NO_PAINT;
+    const stroke = width > 0 ? shapePaint(cs.stroke, num(cs.strokeOpacity, 1) * ctx.op) : NO_PAINT;
     if (fill.colour === null && stroke.colour === null) return [];
     const marker = (v) => (MARKABLE.has(kind) && v && v !== 'none' ? stripId(urlId(v)) : null);
     return [{
@@ -495,13 +524,13 @@ async function pageMain({ code, config, svgId }) {
     const cs = getComputedStyle(el);
     if (cs.display === 'none' || cs.visibility !== 'visible') return [];
     const op = ctx.op * htmlOpacity(el, fo);
-    const fill = paintOf(cs.backgroundColor, op);
+    const fill = brighten(paintOf(cs.backgroundColor, op), ctx.br);
     if (fill.colour === null) return [];
     const r = el.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) return [];
     const box = boxThrough(ctx.rootInv, rectBox(r));
     const bw = num(cs.borderTopWidth, 0);
-    const border = bw > 0 && cs.borderTopStyle !== 'none' && cs.borderTopStyle !== 'hidden' ? paintOf(cs.borderTopColor, op) : NO_PAINT;
+    const border = bw > 0 && cs.borderTopStyle !== 'none' && cs.borderTopStyle !== 'hidden' ? brighten(paintOf(cs.borderTopColor, op), ctx.br) : NO_PAINT;
     const rad = r3(num(cs.borderTopLeftRadius, 0) * scale);
     return [{
       ...head('rect', el.tagName.toLowerCase(), el, ctx, box),
@@ -551,12 +580,50 @@ async function pageMain({ code, config, svgId }) {
     if (cs.display === 'none') return [];
     const op = ctx.op * num(cs.opacity, 1);
     if (op <= 0) return [];
+    const br = ctx.br * brightnessOf(cs);
     if (CONTAINERS.has(tag)) {
-      const entry = ancEntry(el);
-      const inner = { ...ctx, op, anc: entry ? [...ctx.anc, entry] : ctx.anc };
+      const inner = { ...ctx, op, br, anc: [...ctx.anc, ancEntry(el, ctx)] };
       return [...el.children].flatMap((ch) => walk(ch, inner));
     }
-    return cs.visibility === 'visible' ? emit(el, tag, cs, { ...ctx, op }) : [];
+    return cs.visibility === 'visible' ? emit(el, tag, cs, { ...ctx, op, br }) : [];
+  };
+
+  // -- marker definitions --
+  const MARKER_SHAPES = new Set(['rect', 'ellipse', 'line', 'poly', 'path']);
+  const ownMatrix = (el) => {
+    const t = el.transform && el.transform.baseVal && el.transform.baseVal.consolidate();
+    return t ? fromDOM(t.matrix) : [1, 0, 0, 1, 0, 0];
+  };
+  // Matrix of an element in marker content coordinates: only transforms below the <marker>.
+  const markerMatrixOf = (marker) => {
+    const f = (el) => (el === marker ? [1, 0, 0, 1, 0, 0] : mul(f(el.parentElement), ownMatrix(el)));
+    return f;
+  };
+  const markerOrient = (s) => (s === 'auto' || s === 'auto-start-reverse' ? s : num(s, 0));
+  const markerPrim = (p) => ({
+    kind: p.kind, tag: p.tag, cls: p.cls, geom: p.geom, m: p.m, bbox: p.bbox,
+    fill: p.fill, fill_a: p.fill_a, fill_approx: p.fill_approx,
+    stroke: p.stroke, stroke_a: p.stroke_a, stroke_w: p.stroke_w, dash: p.dash,
+  });
+  const markerDef = (marker, serial) => {
+    const attr = (name) => marker.getAttribute(name);
+    const vb = (attr('viewBox') || '').trim().split(/[\s,]+/).map(Number);
+    const ctx = { rootInv: null, op: 1, br: 1, anc: [], serial, inMarker: true, mOf: markerMatrixOf(marker) };
+    return {
+      viewBox: vb.length === 4 && vb.every(Number.isFinite) ? vb.map(r3) : null,
+      refX: r3(num(attr('refX'), 0)), refY: r3(num(attr('refY'), 0)),
+      w: r3(num(attr('markerWidth'), 3)), h: r3(num(attr('markerHeight'), 3)),
+      units: attr('markerUnits') === 'userSpaceOnUse' ? 'userSpaceOnUse' : 'strokeWidth',
+      orient: markerOrient(attr('orient')),
+      prims: [...marker.children].flatMap((ch) => walk(ch, ctx)).filter((p) => MARKER_SHAPES.has(p.kind)).map(markerPrim),
+    };
+  };
+  const markersFor = (root, prims, serial) => {
+    const used = new Set(prims.flatMap((p) => [p.marker_start, p.marker_end]).filter(Boolean));
+    return Object.fromEntries([...root.querySelectorAll('marker')]
+      .map((el) => [stripId(el.getAttribute('id')), el])
+      .filter(([id]) => used.has(id))
+      .map(([id, el]) => [id, markerDef(el, serial)]));
   };
 
   // -- render --
@@ -585,7 +652,9 @@ async function pageMain({ code, config, svgId }) {
       ? [root.viewBox.baseVal.x, root.viewBox.baseVal.y, root.viewBox.baseVal.width, root.viewBox.baseVal.height]
       : [0, 0, root.width.baseVal.value, root.height.baseVal.value];
     const childText = (tag) => { const c = [...root.children].find((n) => n.tagName.toLowerCase() === tag); return c ? c.textContent : null; };
-    const ctx = { rootInv: rootInvOf(root), op: 1, anc: [] };
+    const serial = new Map([...root.querySelectorAll('*')].map((el, k) => [el, k + 1]).concat([[root, 0]]));
+    const rootInv = rootInvOf(root);
+    const ctx = { rootInv, op: 1, br: 1, anc: [], serial, mOf: (el) => matrixOf(rootInv, el) };
     const prims = [...root.children].flatMap((ch) => walk(ch, ctx)).map((p, i) => ({ i, ...p }));
     return {
       ok: true,
@@ -595,6 +664,7 @@ async function pageMain({ code, config, svgId }) {
       desc: childText('desc'),
       svg: rendered.svg,
       prims,
+      markers: markersFor(root, prims, serial),
     };
   } catch (e) {
     return { ok: false, error: { message: `bridge walker: ${errMessage(e)}${e && e.stack ? `\n${e.stack}` : ''}` } };
