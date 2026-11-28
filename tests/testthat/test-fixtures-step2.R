@@ -74,6 +74,42 @@ expect_boxes_are_one_shape <- function(nm, ids) {
   }
 }
 
+# round 2: H2 draws a box crossed by dividers as stacked compartment rects.
+# The compartments of unit `name`: full-width shapes of its subtree stacked
+# from its top to its bottom, each the tallest one starting where the last
+# ended (an ER entity's attribute rows lie over its body compartment).
+unit_compartments <- function(items, name) {
+  u <- item_named(items, name)
+  if (nrow(u) != 1L) return(items[0, ])
+  sub <- subtree_rows(items, name)
+  full <- sub[sub$kind == "shape" & abs(sub$x - u$x) <= 1 & abs(sub$w - u$w) <= 1, ]
+  picked <- integer()
+  y <- u$y
+  repeat {
+    at <- which(abs(full$y - y) <= 1)
+    if (length(at) == 0L) break
+    k <- at[which.max(full$h[at])]
+    picked <- c(picked, k)
+    y <- full$y[[k]] + full$h[[k]]
+    if (abs(y - (u$y + u$h)) <= 1) return(full[picked, ])
+  }
+  items[0, ]
+}
+
+expect_boxes_are_compartments <- function(nm, ids) {
+  items <- fixture_scene(nm)$items
+  for (id in ids) {
+    name <- node_nm(id)
+    expect_equal(nrow(item_named(items, name)), 1L, info = name)
+    s <- unit_compartments(items, name)
+    expect_gte(nrow(s), 1L, label = paste(name, "compartments"))
+    expect_true(all(!is.na(s$fill) & !is.na(s$stroke)), info = name)
+    sub <- subtree_rows(items, name)
+    areas <- sub[sub$kind == "shape" & sub$w > 1 & sub$h > 1, ]
+    expect_false(any_same_box(areas), info = paste(name, "draws a box twice"))
+  }
+}
+
 db_node_ids <- function(nm) {
   nodes <- purrr::discard(fixture_render(nm)$db$nodes, function(n) isTRUE(n$isGroup))
   vapply(nodes, function(n) n$id, character(1))
@@ -88,7 +124,8 @@ edge_prim <- function(nm, edge_id) {
 # -- erDiagram -------------------------------------------------------------------
 
 test_that("erDiagram: every entity box is one shape with fill and stroke", {
-  expect_boxes_are_one_shape("erDiagram", db_node_ids("erDiagram"))
+  # round 2: H2, an entity with attributes is its name and body compartments
+  expect_boxes_are_compartments("erDiagram", db_node_ids("erDiagram"))
 })
 
 test_that("erDiagram: every relationship line has marker shapes at its ends, grouped with it", {
@@ -122,7 +159,12 @@ test_that("erDiagram: every relationship line has marker shapes at its ends, gro
 # -- classDiagram ----------------------------------------------------------------
 
 test_that("classDiagram: each class box (and the note) is one shape", {
-  expect_boxes_are_one_shape("classDiagram", db_node_ids("classDiagram"))
+  # round 2: H2, a class box is its stacked compartments; the note is one shape
+  ids <- db_node_ids("classDiagram")
+  expect_boxes_are_compartments("classDiagram", ids)
+  notes <- ids[startsWith(ids, "note")]
+  expect_gte(length(notes), 1L)
+  expect_boxes_are_one_shape("classDiagram", notes)
 })
 
 test_that("classDiagram: extension ends are hollow triangle shapes touching the parent class box", {
@@ -153,12 +195,13 @@ test_that("classDiagram: extension ends are hollow triangle shapes touching the 
   expect_equal(seen, 3L)     # Animal <|-- Dog, Animal <|-- Cat, Cat ..|> Pet
 })
 
-test_that("classDiagram: composition is a Word diamond, not a shape", {
+test_that("classDiagram: composition is a marker shape, not a Word diamond", {
+  # round 2: H6, the 17 px diamond on a 1 px line is too big for Word's end
   items <- fixture_scene("classDiagram")$items
   e <- item_named(items, edge_nm("Dog", "Tail"))
   expect_equal(nrow(e), 1L)
-  expect_equal(e$head, "diamond")
-  expect_equal(nrow(named_with(items, "mermaid:marker:class-composition")), 0L)
+  expect_equal(e$head, "none")
+  expect_equal(nrow(named_with(items, "mermaid:marker:class-composition")), 1L)
 })
 
 # -- stateDiagram-v2 -------------------------------------------------------------
@@ -236,7 +279,8 @@ test_that("sequenceDiagram: each actor figure is one group", {
 # -- requirementDiagram ----------------------------------------------------------
 
 test_that("requirementDiagram: each box is one shape", {
-  expect_boxes_are_one_shape("requirementDiagram", db_node_ids("requirementDiagram"))
+  # round 2: H2, each box is two stacked compartments (test-scene-rules2.R)
+  expect_boxes_are_compartments("requirementDiagram", db_node_ids("requirementDiagram"))
 })
 
 # -- flowchart-full --------------------------------------------------------------

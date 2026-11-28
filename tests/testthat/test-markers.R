@@ -107,7 +107,11 @@ test_that("with a definition, a marker Word cannot draw leaves no Word end and b
 })
 
 test_that("with a definition, Word-drawable ends stay Word ends and add no shapes", {
+  # round 2: H6 draws an oval or diamond end longer than 5 x the stroke as
+  # shapes, so this uses a 4 px line and a userSpaceOnUse diamond (17 <= 20;
+  # with strokeWidth units it would be 68 px).
   filled_diamond <- marker_composition_start()
+  filled_diamond$units <- "userSpaceOnUse"
   defs <- list(
     "class-compositionEnd" = list("diamond", filled_diamond),
     "flowchart-v2-circleEnd" = list("oval", marker_circle_end()),
@@ -116,7 +120,7 @@ test_that("with a definition, Word-drawable ends stay Word ends and add no shape
     "filled-head" = list("stealth", marker_arrow_point())
   )
   for (id in names(defs)) {
-    items <- mk_items(list(a_line(marker_end = id)),
+    items <- mk_items(list(a_line(stroke_w = 4, marker_end = id)),   # round 2: H6
                       markers = stats::setNames(list(defs[[id]][[2]]), id))
     expect_equal(lines_in(items)$tail, defs[[id]][[1]], info = id)
     expect_equal(nrow(marker_rows(items)), 0L, info = id)
@@ -172,7 +176,8 @@ test_that("an oval end is centred on the marker: the circle end shortens the lin
   # (5 - 11) x 1.1 = -6.6 px.
   # SPEC? the spec's example says -4.8 (scale 0.8), but Mermaid's circleEnd is
   # 11 px wide; this follows the rule (uniform viewBox scale), not the example.
-  items <- mk_items(list(a_line(marker_end = "flowchart-v2-circleEnd")),
+  # round 2: H6, on a 3 px line (11 <= 15); at 1 px the circle is a shape.
+  items <- mk_items(list(a_line(stroke_w = 3, marker_end = "flowchart-v2-circleEnd")),
                     markers = list("flowchart-v2-circleEnd" = marker_circle_end()))
   ln <- lines_in(items)
   expect_equal(ln$tail, "oval")
@@ -190,9 +195,14 @@ test_that("a start marker with plain auto: offset back toward the node is refX -
 })
 
 test_that("a start marker with plain auto, centred kind: refX - centre (class composition)", {
-  # content x 1..18 (centre 9.5), refX 18, strokeWidth units at stroke 1: 8.5 px
-  items <- mk_items(list(a_line(x1 = 30, x2 = 130, marker_start = "class-compositionStart")),
-                    markers = list("class-compositionStart" = marker_composition_start()))
+  # content x 1..18 (centre 9.5), refX 18, scale 1: 8.5 px
+  # round 2: H6, userSpaceOnUse units on a 4 px line (17 <= 20); Mermaid's own
+  # strokeWidth diamond is always longer than 5 x the stroke, so a shape.
+  def <- marker_composition_start()
+  def$units <- "userSpaceOnUse"
+  items <- mk_items(list(a_line(x1 = 30, x2 = 130, stroke_w = 4,
+                                marker_start = "class-compositionStart")),
+                    markers = list("class-compositionStart" = def))
   ln <- lines_in(items)
   expect_equal(ln$head, "diamond")
   expect_near(line_ends(ln)$start, c(21.5, 50), tol = 1e-9)

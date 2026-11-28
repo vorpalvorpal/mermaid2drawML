@@ -357,7 +357,8 @@ test_that("texts with mixed horizontal alignment stay free", {
   expect_equal(sum(items$kind == "text"), 2L)
 })
 
-test_that("texts overlapping vertically by more than 1 px stay free; by less they stack", {
+test_that("texts overlapping vertically by more than 25 % of the smaller height stay free; by less they stack", {
+  # round 2: H3 raised the limit from 1 px to 25 % of the smaller height (5 px here)
   overlap <- function(o) {
     generic_items(list(
       prim_rect(0, 0, 200, 100),
@@ -365,7 +366,7 @@ test_that("texts overlapping vertically by more than 1 px stay free; by less the
       prim_text("b", x = 80, y = 30 - o, w = 40, h = 20)
     ))
   }
-  expect_equal(sum(overlap(1.5)$kind == "text"), 2L)
+  expect_equal(sum(overlap(5.5)$kind == "text"), 2L)
   expect_equal(nrow(overlap(0.5)), 1L)
 })
 
@@ -464,12 +465,17 @@ legend <- function(n, y = 10, cls = "legend", id = "") {
        n = n, cls = cls, id = id)
 }
 
+# round 2: H4b measures "the whole diagram" against the union of all items,
+# so a scope tested alone would be the whole diagram; this puts something
+# else on the canvas.
+outside <- function() list(prim_rect(150, 60, 40, 30, fill = "#00AA00"))
+
 test_that("loose items sharing a scope become a group named after its first class", {
-  items <- generic_items(legend(5, cls = "legend item"))
+  items <- generic_items(c(legend(5, cls = "legend item"), outside()))   # round 2: H4b
   g <- groups_in(items)
   expect_equal(nrow(g), 1L)
   expect_equal(g$name, "mermaid:group:legend")
-  kids <- items[items$kind != "group", ]
+  kids <- items[items$kind != "group" & !items$fill %in% "00AA00", ]
   expect_equal(nrow(kids), 2L)
   expect_true(all(kids$parent == "mermaid:group:legend"))
   expect_near(box_of(g), c(10, 10, 62, 18), tol = 1e-9)
@@ -477,9 +483,10 @@ test_that("loose items sharing a scope become a group named after its first clas
 })
 
 test_that("a scope group is named after the element id first, and 'g' when unnamed", {
-  expect_equal(groups_in(generic_items(legend(5, id = "key", cls = "legend")))$name,
+  # round 2: H4b, with something outside the scope
+  expect_equal(groups_in(generic_items(c(legend(5, id = "key", cls = "legend"), outside())))$name,
                "mermaid:group:key")
-  expect_equal(groups_in(generic_items(legend(5, cls = "")))$name, "mermaid:group:g")
+  expect_equal(groups_in(generic_items(c(legend(5, cls = ""), outside())))$name, "mermaid:group:g")
 })
 
 test_that("a scope that would hold one item makes no group", {
@@ -493,32 +500,35 @@ test_that("a scope that would hold one item makes no group", {
 
 test_that("a scope with more than 40 drawn items is not grouped; 40 is", {
   dots <- function(k) {
-    in_g(purrr::map(seq_len(k), function(i) prim_rect(5 * i, 10, 2, 2)), n = 5, cls = "dots")
+    # round 2: H4b, a rect below the dots so that they are not the whole diagram
+    c(in_g(purrr::map(seq_len(k), function(i) prim_rect(5 * i, 10, 2, 2)), n = 5, cls = "dots"),
+      list(prim_rect(5, 80, 10, 10)))
   }
   expect_equal(nrow(groups_in(generic_items(dots(40), viewBox = c(0, 0, 400, 100)))), 1L)
   expect_equal(nrow(groups_in(generic_items(dots(41), viewBox = c(0, 0, 400, 100)))), 0L)
 })
 
-test_that("a scope covering 90 % of the viewBox both ways is the whole diagram: no group", {
+test_that("a scope covering 90 % of the diagram both ways is the whole diagram: no group", {
+  # round 2: H4b measures against the union of all items, not the viewBox
   whole <- in_g(list(prim_rect(0, 0, 190, 95), prim_rect(50, 50, 10, 10)), n = 5, cls = "all")
   expect_equal(nrow(groups_in(generic_items(whole))), 0L)
-  # 95 % wide but 80 % high: smaller in one direction, so grouped
+  # all of the width but 80 % of the height (a rect below it): grouped
   wide <- in_g(list(prim_rect(0, 0, 190, 80), prim_rect(50, 50, 10, 10)), n = 5, cls = "all")
-  expect_equal(nrow(groups_in(generic_items(wide))), 1L)
+  expect_equal(nrow(groups_in(generic_items(c(wide, list(prim_rect(0, 90, 10, 10)))))), 1L)
 })
 
 test_that("groups nest when their scopes nest", {
   inner <- in_g(list(prim_rect(10, 10, 10, 10), prim_rect(30, 10, 10, 10)), n = 3, cls = "inner")
   outer <- in_g(c(inner, list(prim_rect(10, 40, 10, 10), prim_rect(30, 40, 10, 10))),
                 n = 2, cls = "outer")
-  items <- generic_items(outer)
+  items <- generic_items(c(outer, outside()))     # round 2: H4b
   g <- groups_in(items)
   expect_setequal(g$name, c("mermaid:group:outer", "mermaid:group:inner"))
   expect_true(is.na(item_named(items, "mermaid:group:outer")$parent))
   expect_equal(item_named(items, "mermaid:group:inner")$parent, "mermaid:group:outer")
   drawn <- items[items$kind != "group", ]
-  expect_equal(sum(drawn$parent == "mermaid:group:inner"), 2L)
-  expect_equal(sum(drawn$parent == "mermaid:group:outer"), 2L)
+  expect_equal(sum(drawn$parent %in% "mermaid:group:inner"), 2L)
+  expect_equal(sum(drawn$parent %in% "mermaid:group:outer"), 2L)
 })
 
 test_that("sibling scopes with the same class get unique names in document order", {

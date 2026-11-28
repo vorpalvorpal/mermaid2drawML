@@ -135,7 +135,8 @@ test_that("flowchart-full: line ends follow the link markers", {
   ends <- function(from, to) unlist(item_named(items, edge_name(from, to))[c("head", "tail")])
   expect_equal(ends("a", "b"), c(head = "none", tail = "triangle"))
   expect_equal(ends("a", "c"), c(head = "none", tail = "none"))
-  expect_equal(ends("a", "f"), c(head = "none", tail = "oval"))
+  # round 2: H6, the 11 px circle on a 1 px line is drawn as a marker shape
+  expect_equal(ends("a", "f"), c(head = "none", tail = "none"))
   expect_equal(ends("a", "g"), c(head = "none", tail = "none"))   # step 2: C1, a cross is no Word end
   expect_equal(ends("a", "h"), c(head = "triangle", tail = "triangle"))
 })
