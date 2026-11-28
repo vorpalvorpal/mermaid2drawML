@@ -287,7 +287,10 @@ const renderOnPage = async (page, deps, code, opts) => {
 };
 
 const renderOne = async (browser, deps, code, opts, label) => {
-  const page = await browser.newPage();
+  // A page that cannot be opened (the browser died) fails this diagram, not
+  // the run: the others still get their own result.
+  const page = await browser.newPage().catch((e) => e);
+  if (page instanceof Error) return failure(`bridge: cannot open a page: ${page.message}`, 'bridge');
   page.on('console', (msg) => process.stderr.write(`[${label}] ${msg.text()}\n`));
   page.on('pageerror', (err) => process.stderr.write(`[${label}] page error: ${err.message}\n`));
   try {
@@ -566,14 +569,22 @@ async function pageMain({ code, config, svgId, zen, packs, wantSvg }) {
     const edges = new Map(db.edges.filter((e) => str(e.id))
       .map((e) => [str(e.id), { id: str(e.id), ...('start' in e ? { start: e.start } : {}), ...('end' in e ? { end: e.end } : {}) }]));
     const edgeFor = (k) => edges.get(k) || (/_\d+$/.test(k) ? edges.get(k.replace(/_\d+$/, '')) : undefined);
+    // A node and an edge may share an id (a state called "edge0"). A drawn
+    // element such as a path is an edge's before it is a node's; a container
+    // is a node's by its own id before it is an edge's label by its data-id.
     return (el) => {
       if (!el.getAttribute) return null;
-      const keys = [stripId(el.getAttribute('id')), stripId(el.getAttribute('data-id'))].filter(Boolean);
-      const node = keys.map((k) => nodes.get(k)).find(Boolean);
-      if (node) return node;
-      const edge = keys.map(edgeFor).find(Boolean);
-      if (!edge) return null;
-      return { kind: CONTAINERS.has(el.tagName.toLowerCase()) ? 'edge_label' : 'edge', ...edge };
+      const id = stripId(el.getAttribute('id'));
+      const keys = [id, stripId(el.getAttribute('data-id'))].filter(Boolean);
+      const container = CONTAINERS.has(el.tagName.toLowerCase());
+      const nodeBy = (ks) => ks.map((k) => nodes.get(k)).find(Boolean) || null;
+      const edgeBy = (ks) => {
+        const edge = ks.map(edgeFor).find(Boolean);
+        return edge ? { kind: container ? 'edge_label' : 'edge', ...edge } : null;
+      };
+      return container
+        ? nodeBy([id].filter(Boolean)) || edgeBy(keys) || nodeBy(keys)
+        : edgeBy(keys) || nodeBy(keys);
     };
   };
 
@@ -772,7 +783,7 @@ async function pageMain({ code, config, svgId, zen, packs, wantSvg }) {
     const r = img.getBoundingClientRect();
     if (!(r.width > 0 && r.height > 0)) return [];
     const box = boxThrough(ctx.rootInv, rectBox(r));
-    return [{ ...head('image', 'img', img, ctx, box), geom: boxGeom(box), href: img.getAttribute('src') || '', m: IDENTITY, png: ctx.pngs.get(img) ?? null, html: true }];
+    return [{ ...head('image', 'img', img, ctx, box), geom: boxGeom(box), href: cutData(img.getAttribute('src') || ''), m: IDENTITY, png: ctx.pngs.get(img) ?? null, html: true }];
   };
   // Is el inside an <svg> nested in the foreignObject's HTML?
   const inNestedSvg = (el, fo) => !!el.parentElement && el.parentElement !== fo &&
@@ -795,7 +806,7 @@ async function pageMain({ code, config, svgId, zen, packs, wantSvg }) {
   const imagePrim = (el, ctx) => {
     const bb = safeBBox(el), m = matrixOf(ctx.rootInv, el);
     if (!bb || !m || !(bb[2] > 0 && bb[3] > 0)) return [];
-    return [{ ...head('image', 'image', el, ctx, boxThrough(m, bb)), geom: boxGeom(bb), href: hrefOf(el), m: roundM(m), png: ctx.pngs.get(el) ?? null }];
+    return [{ ...head('image', 'image', el, ctx, boxThrough(m, bb)), geom: boxGeom(bb), href: cutData(hrefOf(el)), m: roundM(m), png: ctx.pngs.get(el) ?? null }];
   };
   const otherPrim = (el, tag, ctx) => {
     if (!(el instanceof SVGGraphicsElement)) return [];
@@ -900,8 +911,12 @@ async function pageMain({ code, config, svgId, zen, packs, wantSvg }) {
   };
 
   // -- the rendered diagram's db --
+  // A data URI cut after its header: an embedded picture travels once, as
+  // the image prim's png, not again wherever its source is repeated.
+  const cutData = (s) => (s.startsWith('data:') ? s.slice(0, s.indexOf(',') + 1) : s);
   const jsonSafe = (x, stack) => {
-    if (x === null || typeof x === 'string' || typeof x === 'boolean') return x;
+    if (typeof x === 'string') return cutData(x);
+    if (x === null || typeof x === 'boolean') return x;
     if (typeof x === 'number') return Number.isFinite(x) ? x : null;
     if (typeof x !== 'object' || stack.includes(x) || stack.length > 12 || x instanceof Node) return undefined;
     const inner = [...stack, x];
@@ -959,6 +974,10 @@ async function pageMain({ code, config, svgId, zen, packs, wantSvg }) {
     }
   });
   if (rendered.error !== undefined) return { ok: false, error: { message: rendered.error, kind: 'syntax' } };
+  // Every render builds a Diagram, so seeing none means the capture no
+  // longer fits this Mermaid: say so instead of returning a drawing without
+  // its units.
+  if (!rendered.diagram) return { ok: false, error: { message: 'could not read the diagram Mermaid drew (its internals have changed)', kind: 'bridge' } };
   container.innerHTML = rendered.svg;
   await document.fonts.ready;
   const root = container.querySelector('svg');

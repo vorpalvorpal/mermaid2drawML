@@ -79,6 +79,12 @@ Agricultural 'waste',Bio-conversion,124.729
 Bio-conversion,Liquid,0.597
 Bio-conversion,Solid,26.862
 `;
+// States named as Mermaid names its transitions (edge0, edge1, ...).
+const CLASH = `stateDiagram-v2
+  [*] --> edge1
+  edge1 --> edge0
+  edge0 --> [*]
+`;
 // A valid 2x2 RGBA PNG.
 const PNG_B64 = 'iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVR4nGP4z8DwHwyBNBAw/AcAR8oI+ItOQ4UAAAAASUVORK5CYII=';
 const IMG_NODE = `flowchart LR
@@ -145,7 +151,7 @@ const PNG_SIG = [137, 80, 78, 71, 13, 10, 26, 10];
 
 describe('bridge contract 4', { skip: skipReason }, () => {
   let tmp, flow, elk, cls, state, er, seq, pie, gantt, sankey;
-  let imgNode, imgNodeBroken, imgHtml, zen, bad, icons;
+  let imgNode, imgNodeBroken, imgHtml, zen, bad, icons, clash;
   let flowAlone, clsAlone, clsSvg, svgRun, timedOut, timedOutRun, radial, badFlag;
   const unitDiagrams = () => [['flowchart', flow], ['elk', elk], ['class', cls], ['state', state], ['er', er]];
 
@@ -182,6 +188,7 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     fs.writeFileSync(cfg, JSON.stringify(RADIAL_CFG));
     [radial] = parseOut(runBridge(['--config', cfg, f.radial]));
     badFlag = runBridge(['--no-such-flag', f.flow]);
+    [clash] = parseOut(runBridge([write('clash', CLASH)]));
   });
   after(() => { if (tmp) fs.rmSync(tmp, { recursive: true, force: true }); });
 
@@ -447,7 +454,27 @@ describe('bridge contract 4', { skip: skipReason }, () => {
     });
   });
 
+  describe('a node named like an edge', () => {
+    it('keeps the transitions as edges and the states as nodes', () => {
+      // A path is an edge's element even when a node has the same id.
+      assert.equal(clash.ok, true);
+      assert.deepEqual(ids(unitsOfKind(clash, 'edge')), sortedIds(clash.db.edges));
+      assert.deepEqual(ids(unitsOfKind(clash, 'node')), sortedIds(dbNodes(clash)));
+      const paths = clash.prims.filter((p) => p.kind === 'path' && p.unit);
+      assert.ok(paths.length >= 3);
+      for (const p of paths) assert.equal(p.unit.kind, 'edge', `path ${p.id} is ${JSON.stringify(p.unit)}`);
+      assert.equal(unitOf(textPrim(clash, 'edge0'), 'node').id, 'edge0');
+    });
+  });
+
   describe('V4 images', () => {
+    it('does not send an embedded picture again as its href or in the db', () => {
+      // The picture travels once, as png: a data URI is cut after its header.
+      const img = imgNode.prims.find((p) => p.kind === 'image');
+      assert.match(img.href, /^data:image\/png;base64,$/);
+      assert.ok(!JSON.stringify(imgNode.db).includes(PNG_B64), 'db holds the picture');
+      for (const h of imgHtml.prims.filter((p) => p.kind === 'image' && p.png)) assert.ok(!h.href.includes(PNG_B64));
+    });
     it('reports an image node as an image prim with PNG data, bbox and m', () => {
       const img = imgNode.prims.find((p) => p.kind === 'image');
       assert.ok(img, 'image prim');
